@@ -45,6 +45,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.elowen.niceTV.NiceTVApplication
+import com.elowen.niceTV.data.backend.AuthRepository
+import com.elowen.niceTV.data.backend.BackendApiClient
+import com.elowen.niceTV.data.backend.BackendRepository
 import com.elowen.niceTV.data.db.entity.DownloadEntity
 import com.elowen.niceTV.data.network.CookieManager
 import kotlinx.coroutines.flow.first
@@ -73,6 +76,8 @@ import com.elowen.niceTV.core.BoxManager
 import com.elowen.niceTV.core.NetworkRestrictionManager
 import com.elowen.niceTV.core.platform.proxy.ProxyRuntimeConfig
 import com.elowen.niceTV.ui.viewmodel.DetailViewModel
+import com.elowen.niceTV.ui.viewmodel.AuthUiState
+import com.elowen.niceTV.ui.viewmodel.AuthViewModel
 import com.elowen.niceTV.data.model.VideoDetail
 import com.elowen.niceTV.data.model.Post
 import com.elowen.niceTV.service.ProxyService
@@ -105,6 +110,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var viewModel: MainViewModel
     private lateinit var detailViewModel: DetailViewModel
     private lateinit var videoListViewModel: VideoListViewModel
+    private lateinit var authViewModel: AuthViewModel
     private lateinit var cookieManager: CookieManager
 
     private var selectedUrl by mutableStateOf<String?>(null)
@@ -190,7 +196,10 @@ class MainActivity : ComponentActivity() {
         cookieManager = CookieManager(this)
         com.elowen.niceTV.data.network.HttpClient.init(cookieManager)
         val scraper = HtmlScraper()
-        val repository = PostRepository(scraper, db.favoriteDao())
+        val backendApi = BackendApiClient()
+        val authRepository = AuthRepository(this, backendApi)
+        val backendRepository = BackendRepository(backendApi, authRepository, db.favoriteDao())
+        val repository = PostRepository(scraper, db.favoriteDao(), backendRepository)
         val tagRepository = TagRepository(scraper)
         val downloadRepository = com.elowen.niceTV.data.repository.DownloadRepository(this)
         continueWatchingPost = loadContinueWatchingPost()
@@ -198,8 +207,9 @@ class MainActivity : ComponentActivity() {
         watchHistoryPosts = loadWatchHistoryPosts()
 
         viewModel = MainViewModel(repository)
-        detailViewModel = DetailViewModel(repository, downloadRepository)
+        detailViewModel = DetailViewModel(repository, downloadRepository, backendRepository, authRepository)
         videoListViewModel = VideoListViewModel(repository, tagRepository)
+        authViewModel = AuthViewModel(authRepository, repository)
         val favoriteViewModel = com.elowen.niceTV.ui.viewmodel.FavoriteViewModel(repository)
         
 
@@ -216,6 +226,7 @@ class MainActivity : ComponentActivity() {
             val detailState by detailViewModel.state
             val videoListState by videoListViewModel.state
             val favoriteState by favoriteViewModel.state
+            val authState by authViewModel.state
             val runWithNotificationPermission = rememberNotificationPermissionGate(
                 deniedMessage = "未授予通知权限，下载仍会开始，但后台进度通知可能不可见"
             )
@@ -330,6 +341,7 @@ class MainActivity : ComponentActivity() {
                                                videoListViewModel = videoListViewModel,
                                                favoriteState = favoriteState,
                                                favoriteViewModel = favoriteViewModel,
+                                               authState = authState,
                                                continueWatchingPost = continueWatchingPost,
                                                continueWatchingProgressText = continueWatchingProgressText,
                                                watchHistoryPosts = watchHistoryPosts,
@@ -373,7 +385,11 @@ class MainActivity : ComponentActivity() {
                                                onBackFromList = { handleVideoListBack() },
                                                onSearch = { query -> videoListViewModel.performSearch(query) },
                                                onLoadMore = { videoListViewModel.loadMore() },
-                                               runWithNotificationPermission = runWithNotificationPermission
+                                               runWithNotificationPermission = runWithNotificationPermission,
+                                               onLogin = { login, password -> authViewModel.login(login, password) },
+                                               onRegister = { username, password -> authViewModel.register(username, password) },
+                                               onLogout = { authViewModel.logout() },
+                                               onSyncFavorites = { authViewModel.syncFavorites() }
                                          )
                                      }
                                 }
@@ -423,6 +439,7 @@ class MainActivity : ComponentActivity() {
                                               videoListViewModel = videoListViewModel,
                                               favoriteState = favoriteState,
                                               favoriteViewModel = favoriteViewModel,
+                                              authState = authState,
                                               continueWatchingPost = continueWatchingPost,
                                               continueWatchingProgressText = continueWatchingProgressText,
                                               watchHistoryPosts = watchHistoryPosts,
@@ -466,7 +483,11 @@ class MainActivity : ComponentActivity() {
                                              onBackFromList = { handleVideoListBack() },
                                              onSearch = { query -> videoListViewModel.performSearch(query) },
                                              onLoadMore = { videoListViewModel.loadMore() },
-                                             runWithNotificationPermission = runWithNotificationPermission
+                                             runWithNotificationPermission = runWithNotificationPermission,
+                                             onLogin = { login, password -> authViewModel.login(login, password) },
+                                             onRegister = { username, password -> authViewModel.register(username, password) },
+                                             onLogout = { authViewModel.logout() },
+                                             onSyncFavorites = { authViewModel.syncFavorites() }
                                          )
                                     }
                                 }
@@ -539,7 +560,14 @@ class MainActivity : ComponentActivity() {
                                         downloadBytes = detailState.downloadBytes,
                                         showStreamingWarning = detailState.showStreamingWarning,
                                         isOffline = detailState.isOffline,
+                                        comments = detailState.comments,
+                                        areCommentsLoading = detailState.areCommentsLoading,
+                                        isCommentPosting = detailState.isCommentPosting,
+                                        commentError = detailState.commentError,
+                                        isLoggedIn = authState.isLoggedIn,
                                         onToggleFavorite = { detailViewModel.toggleFavorite() },
+                                        onSubmitComment = { detailViewModel.submitComment(it) },
+                                        onLikeComment = { detailViewModel.likeComment(it) },
                                         onStartDownload = {
                                             runWithNotificationPermission {
                                                 detailViewModel.startDownload()
@@ -1167,6 +1195,7 @@ fun ContentArea(
     videoListViewModel: VideoListViewModel,
     favoriteState: com.elowen.niceTV.ui.viewmodel.FavoriteState,
     favoriteViewModel: com.elowen.niceTV.ui.viewmodel.FavoriteViewModel,
+    authState: AuthUiState,
     continueWatchingPost: Post?,
     continueWatchingProgressText: String?,
     watchHistoryPosts: List<Post>,
@@ -1180,7 +1209,11 @@ fun ContentArea(
     onBackFromList: () -> Unit,
     onSearch: (String) -> Unit,
     onLoadMore: () -> Unit,
-    runWithNotificationPermission: ((() -> Unit) -> Unit)
+    runWithNotificationPermission: ((() -> Unit) -> Unit),
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String) -> Unit,
+    onLogout: () -> Unit,
+    onSyncFavorites: () -> Unit
 ) {
     when (navState) {
         is NavigationState.Home -> {
@@ -1199,7 +1232,13 @@ fun ContentArea(
         }
 
         is NavigationState.User -> {
-             com.elowen.niceTV.ui.screens.UserScreen()
+             com.elowen.niceTV.ui.screens.UserScreen(
+                 authState = authState,
+                 onLogin = onLogin,
+                 onRegister = onRegister,
+                 onLogout = onLogout,
+                 onSyncFavorites = onSyncFavorites
+             )
         }
 
         is NavigationState.VideoList -> {

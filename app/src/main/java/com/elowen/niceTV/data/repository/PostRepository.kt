@@ -6,13 +6,15 @@ import com.elowen.niceTV.data.model.VideoDetail
 import com.elowen.niceTV.data.model.VideoSource
 import com.elowen.niceTV.data.scraper.HtmlScraper
 import org.jsoup.nodes.Document
+import com.elowen.niceTV.data.backend.BackendRepository
 import com.elowen.niceTV.data.db.dao.FavoriteDao
 import com.elowen.niceTV.data.db.entity.FavoriteEntity
 import kotlinx.coroutines.flow.Flow
 
 class PostRepository(
     private val scraper: HtmlScraper,
-    private val favoriteDao: FavoriteDao
+    private val favoriteDao: FavoriteDao,
+    private val backendRepository: BackendRepository? = null
 ) {
     // 收藏功能
     val allFavorites: Flow<List<FavoriteEntity>> = favoriteDao.getAllFavorites()
@@ -22,24 +24,43 @@ class PostRepository(
     suspend fun toggleFavorite(detail: VideoDetail) {
         val isFav = favoriteDao.isFavoriteSync(detail.postLink)
         if (isFav) {
+            val existing = favoriteDao.getFavoritesByLinks(listOf(detail.postLink)).firstOrNull()
             favoriteDao.delete(detail.postLink)
+            existing?.let { favorite ->
+                runCatching { backendRepository?.syncFavoriteDelete(favorite) }
+            }
         } else {
-            favoriteDao.insert(
-                FavoriteEntity(
-                    link = detail.postLink,
-                    title = detail.title,
-                    imageUrl = detail.imageUrl,
-                    maker = detail.maker,
-                    tags = detail.tags.joinToString(","),
-                    cast = detail.cast.joinToString(",")
-                )
-            )
+            favoriteDao.insert(detail.toFavoriteEntity())
+            runCatching {
+                backendRepository?.syncFavoriteUpsert(detail)
+            }
         }
+    }
+
+    suspend fun syncFavoritesWithCloud(): Int {
+        return backendRepository?.syncFavoritesWithCloud() ?: 0
     }
 
     suspend fun removeFavorites(links: List<String>) {
         if (links.isEmpty()) return
+        val existing = favoriteDao.getFavoritesByLinks(links)
         favoriteDao.deleteAll(links)
+        existing.forEach { favorite ->
+            runCatching {
+                backendRepository?.syncFavoriteDelete(favorite)
+            }
+        }
+    }
+
+    private fun VideoDetail.toFavoriteEntity(): FavoriteEntity {
+        return FavoriteEntity(
+            link = postLink,
+            title = title,
+            imageUrl = imageUrl,
+            maker = maker,
+            tags = tags.joinToString(","),
+            cast = cast.joinToString(",")
+            )
     }
 
     /**

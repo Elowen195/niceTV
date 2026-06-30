@@ -4,6 +4,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elowen.niceTV.data.model.VideoDetail
+import com.elowen.niceTV.data.backend.AuthRepository
+import com.elowen.niceTV.data.backend.BackendRepository
+import com.elowen.niceTV.data.backend.CommentItem
 import com.elowen.niceTV.data.repository.PostRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -27,18 +30,26 @@ data class DetailState(
     // Snapshot fields to force UI updates even if Download object is mutated in-place.
     val downloadProgress: Float = -1f,
     val downloadStateCode: Int? = null,
-    val downloadBytes: Long = 0L
+    val downloadBytes: Long = 0L,
+    val remoteVideoRefId: String? = null,
+    val comments: List<CommentItem> = emptyList(),
+    val areCommentsLoading: Boolean = false,
+    val isCommentPosting: Boolean = false,
+    val commentError: String? = null
 )
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 class DetailViewModel(
     private val repository: PostRepository,
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    private val backendRepository: BackendRepository? = null,
+    private val authRepository: AuthRepository? = null
 ) : ViewModel() {
     val state = mutableStateOf(DetailState())
     private var favoriteJob: Job? = null
     private var downloadJob: Job? = null
     private var loadJob: Job? = null
+    private var cloudJob: Job? = null
     private var fastStartCheckedUrl: String? = null
 
     fun toggleFavorite() {
@@ -77,7 +88,12 @@ class DetailViewModel(
                 download = null,
                 downloadProgress = -1f,
                 downloadStateCode = null,
-                downloadBytes = 0L
+                downloadBytes = 0L,
+                remoteVideoRefId = null,
+                comments = emptyList(),
+                areCommentsLoading = false,
+                isCommentPosting = false,
+                commentError = null
             )
             
             // [Offline/Direct Link Support]
@@ -98,7 +114,12 @@ class DetailViewModel(
                       download = null,
                       downloadProgress = -1f,
                       downloadStateCode = null,
-                      downloadBytes = 0L
+                      downloadBytes = 0L,
+                      remoteVideoRefId = null,
+                      comments = emptyList(),
+                      areCommentsLoading = false,
+                      isCommentPosting = false,
+                      commentError = null
                  )
                  checkDownloadStatus(url)
                  maybeCheckStreamingWarning(url)
@@ -111,6 +132,7 @@ class DetailViewModel(
                 
                 // 立即更新 UI，显示文字、图片和推荐列表
                 state.value = state.value.copy(isLoading = false, isVideoLoading = true, detail = partialDetail)
+                loadCloudDetail(partialDetail)
 
                 // 2. 第二阶段：异步解析耗时的视频播放地址（全部 4 个服务器）
                 val servers = repository.resolveVideoUrlFromDoc(doc)
@@ -208,6 +230,8 @@ class DetailViewModel(
         downloadJob = null
         loadJob?.cancel()
         loadJob = null
+        cloudJob?.cancel()
+        cloudJob = null
         fastStartCheckedUrl = null
         state.value = DetailState()
     }
@@ -219,6 +243,8 @@ class DetailViewModel(
         favoriteJob = null
         downloadJob?.cancel()
         downloadJob = null
+        cloudJob?.cancel()
+        cloudJob = null
         state.value = state.value.copy(
             isLoading = false,
             isVideoLoading = false,
@@ -230,11 +256,95 @@ class DetailViewModel(
             isOffline = true,
             downloadProgress = -1f,
             downloadStateCode = null,
-            downloadBytes = 0L
+            downloadBytes = 0L,
+            remoteVideoRefId = null,
+            comments = emptyList(),
+            areCommentsLoading = false,
+            isCommentPosting = false,
+            commentError = null
         )
         // Check download status for this POST
         checkDownloadStatus(detail.postLink)
         maybeCheckStreamingWarning(detail.videoUrl ?: "")
+    }
+
+    fun submitComment(body: String) {
+        val trimmed = body.trim()
+        if (trimmed.isBlank()) return
+        if (authRepository?.currentSession() == null) {
+            state.value = state.value.copy(commentError = "登录后才能评论")
+            return
+        }
+        val videoRefId = state.value.remoteVideoRefId
+        if (videoRefId.isNullOrBlank()) {
+            state.value = state.value.copy(commentError = "评论区还在初始化，请稍后再试")
+            return
+        }
+        viewModelScope.launch {
+            state.value = state.value.copy(isCommentPosting = true, commentError = null)
+            try {
+                val comment = backendRepository?.createComment(videoRefId, trimmed)
+                state.value = state.value.copy(
+                    isCommentPosting = false,
+                    comments = listOfNotNull(comment) + state.value.comments,
+                    commentError = null
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                state.value = state.value.copy(
+                    isCommentPosting = false,
+                    commentError = "评论发送失败，请稍后重试"
+                )
+            }
+        }
+    }
+
+    fun likeComment(commentId: String) {
+        if (authRepository?.currentSession() == null) {
+            state.value = state.value.copy(commentError = "登录后才能点赞")
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                backendRepository?.likeComment(commentId)
+            }.getOrNull()?.let { updated ->
+                state.value = state.value.copy(
+                    comments = state.value.comments.map { if (it.id == updated.id) updated else it },
+                    commentError = null
+                )
+            }
+        }
+    }
+
+    private fun loadCloudDetail(detail: VideoDetail) {
+        val backend = backendRepository ?: return
+        if (detail.postLink.isBlank()) return
+        cloudJob?.cancel()
+        cloudJob = viewModelScope.launch {
+            state.value = state.value.copy(areCommentsLoading = true, commentError = null)
+            try {
+                val videoRef = backend.upsertVideoRef(detail)
+                if (videoRef == null) {
+                    state.value = state.value.copy(areCommentsLoading = false)
+                    return@launch
+                }
+                val comments = backend.listComments(videoRef.id)
+                state.value = state.value.copy(
+                    remoteVideoRefId = videoRef.id,
+                    comments = comments,
+                    areCommentsLoading = false,
+                    commentError = null
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                state.value = state.value.copy(
+                    areCommentsLoading = false,
+                    commentError = "评论加载失败"
+                )
+            }
+        }
     }
 
 

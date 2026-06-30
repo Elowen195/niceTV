@@ -18,6 +18,12 @@ interface FavoriteDao {
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE link = :link)")
     suspend fun isFavoriteSync(link: String): Boolean
 
+    @Query("SELECT * FROM favorites ORDER BY createdAt DESC")
+    suspend fun getAllFavoritesOnce(): List<FavoriteEntity>
+
+    @Query("SELECT * FROM favorites WHERE link IN (:links)")
+    suspend fun getFavoritesByLinks(links: List<String>): List<FavoriteEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(favorite: FavoriteEntity)
 

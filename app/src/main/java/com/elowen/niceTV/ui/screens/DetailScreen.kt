@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,12 +34,15 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -66,6 +70,7 @@ import com.bumptech.glide.integration.compose.GlideImage
 import com.elowen.niceTV.data.model.Post
 import com.elowen.niceTV.data.model.VideoDetail
 import com.elowen.niceTV.data.model.VideoSource
+import com.elowen.niceTV.data.backend.CommentItem
 import com.elowen.niceTV.data.manager.CacheKeyUtil
 import com.elowen.niceTV.ui.components.VideoCard
 import com.elowen.niceTV.data.network.CookieManager
@@ -90,7 +95,14 @@ fun DetailScreen(
     downloadBytes: Long = 0L,
     showStreamingWarning: Boolean = false,
     isOffline: Boolean = false,
+    comments: List<CommentItem> = emptyList(),
+    areCommentsLoading: Boolean = false,
+    isCommentPosting: Boolean = false,
+    commentError: String? = null,
+    isLoggedIn: Boolean = false,
     onToggleFavorite: () -> Unit = {},
+    onSubmitComment: (String) -> Unit = {},
+    onLikeComment: (String) -> Unit = {},
     onStartDownload: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     onBackClick: () -> Unit,
@@ -415,6 +427,15 @@ fun DetailScreen(
                                             modifier = Modifier.padding(vertical = 8.dp)
                                         )
                                     }
+                                    DetailCommentsSection(
+                                        comments = comments,
+                                        areLoading = areCommentsLoading,
+                                        isPosting = isCommentPosting,
+                                        error = commentError,
+                                        isLoggedIn = isLoggedIn,
+                                        onSubmitComment = onSubmitComment,
+                                        onLikeComment = onLikeComment
+                                    )
                                 }
                             }
                         }
@@ -571,6 +592,15 @@ fun DetailScreen(
                                         modifier = Modifier.clickable { onMakerClick(detail.maker, detail.makerLink.ifBlank { null }) }
                                     )
                                 }
+                                DetailCommentsSection(
+                                    comments = comments,
+                                    areLoading = areCommentsLoading,
+                                    isPosting = isCommentPosting,
+                                    error = commentError,
+                                    isLoggedIn = isLoggedIn,
+                                    onSubmitComment = onSubmitComment,
+                                    onLikeComment = onLikeComment
+                                )
                             }
                         }
                         if (!isOffline) {
@@ -596,6 +626,87 @@ fun DetailScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailCommentsSection(
+    comments: List<CommentItem>,
+    areLoading: Boolean,
+    isPosting: Boolean,
+    error: String?,
+    isLoggedIn: Boolean,
+    onSubmitComment: (String) -> Unit,
+    onLikeComment: (String) -> Unit
+) {
+    var body by remember { mutableStateOf("") }
+    Spacer(modifier = Modifier.height(20.dp))
+    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+    Spacer(modifier = Modifier.height(16.dp))
+    Text("评论", style = MaterialTheme.typography.titleMedium, color = Color.White)
+    Spacer(modifier = Modifier.height(8.dp))
+    if (!isLoggedIn) {
+        Text("登录后可以发表评论和点赞。", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+    OutlinedTextField(
+        value = body,
+        onValueChange = { body = it.take(1000) },
+        enabled = isLoggedIn && !isPosting,
+        label = { Text(if (isLoggedIn) "写下评论" else "未登录") },
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 2,
+        maxLines = 4
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Button(
+            enabled = isLoggedIn && !isPosting && body.isNotBlank(),
+            onClick = {
+                onSubmitComment(body)
+                body = ""
+            }
+        ) {
+            Text(if (isPosting) "发送中" else "发送")
+        }
+        if (areLoading) {
+            Spacer(modifier = Modifier.width(12.dp))
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        }
+    }
+    error?.let {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall)
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+    if (!areLoading && comments.isEmpty()) {
+        Text("还没有评论。", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        comments.forEach { comment ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                    .padding(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(comment.username, color = Color.Cyan, style = MaterialTheme.typography.labelLarge)
+                    TextButton(
+                        enabled = isLoggedIn,
+                        onClick = { onLikeComment(comment.id) }
+                    ) {
+                        Text("赞 ${comment.likeCount}")
+                    }
+                }
+                Text(comment.body, color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
