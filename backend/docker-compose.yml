@@ -1,15 +1,19 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: nicetv
       POSTGRES_USER: nicetv
-      POSTGRES_PASSWORD: nicetv
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nicetv -d nicetv"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     command:
       - postgres
       - -c
@@ -19,18 +23,19 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       ADDR: :8080
-      DATABASE_URL: postgres://nicetv:nicetv@postgres:5432/nicetv?sslmode=disable
-      JWT_SECRET: change-me-before-deploy
+      DATABASE_URL: postgres://nicetv:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env}@postgres:5432/nicetv?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in backend/.env}
       ACCESS_TOKEN_TTL: 15m
       REFRESH_TOKEN_TTL: 720h
-      CORS_ORIGIN: "*"
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   pgdata:
-

@@ -36,10 +36,21 @@ curl http://127.0.0.1:8080/healthz
 
 ## Docker Compose Deploy
 
-On the VPS, pull the latest code and rebuild locally:
+On the VPS, pull the latest code and create a local `.env` from the example:
 
 ```bash
 git pull
+cp .env.example .env
+nano .env
+docker compose up -d --build
+```
+
+The production Compose file does not expose PostgreSQL publicly, and binds the API to `127.0.0.1:8080` for nginx reverse proxying.
+
+For an existing PostgreSQL volume, changing `POSTGRES_PASSWORD` in `.env` does not update the database user automatically. Change the real database password first, then restart the API:
+
+```bash
+docker compose exec postgres psql -U nicetv -d nicetv -c "ALTER USER nicetv WITH PASSWORD 'your-new-postgres-password';"
 docker compose up -d --build
 ```
 
