@@ -33,18 +33,23 @@ Health check:
 curl http://127.0.0.1:8080/healthz
 ```
 
-## Docker Image
+## Docker Compose Deploy
 
-GitHub Actions publishes the backend image to:
+On the VPS, pull the latest code and rebuild locally:
 
-```text
-ghcr.io/elowen195/nicetv-backend
+```bash
+git pull
+docker compose up -d --build
 ```
 
-Tags:
+Keep production secrets in a local `.env` file or in the shell environment, not in Git:
 
-- Push to `main`: `latest`, `main`, and `sha-<commit>`.
-- Push a version tag like `v1.0.0`: `v1.0.0`, `1.0.0`, and `1.0`.
+```bash
+DATABASE_URL=postgres://nicetv:nicetv@postgres:5432/nicetv?sslmode=disable
+JWT_SECRET=replace-with-a-long-random-secret
+```
+
+GitHub Actions only checks that tests pass and the Docker image can build.
 
 ## Local Run
 
