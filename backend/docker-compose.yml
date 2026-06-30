@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nicetv
+      POSTGRES_USER: nicetv
+      POSTGRES_PASSWORD: nicetv
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=20
+
+  api:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      ADDR: :8080
+      DATABASE_URL: postgres://nicetv:nicetv@postgres:5432/nicetv?sslmode=disable
+      JWT_SECRET: change-me-before-deploy
+      ACCESS_TOKEN_TTL: 15m
+      REFRESH_TOKEN_TTL: 720h
+      CORS_ORIGIN: "*"
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+

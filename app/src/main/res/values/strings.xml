@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">NiceTV</string>
+    <string name="download_channel_name">视频下载</string>
+    <string name="download_channel_description">视频下载进度通知</string>
+    <string name="webview_status_cookie_success">访问验证成功！</string>
+    <string name="webview_status_timeout">验证时间较长，可能卡住了\n请尝试点击下方按钮重新验证</string>
+    <string name="webview_status_fetching">正在验证访问…</string>
+    <string name="webview_status_retrying">正在重新验证访问…</string>
+    <string name="webview_retry_button">重新验证</string>
+</resources>
