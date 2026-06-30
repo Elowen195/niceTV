@@ -148,6 +148,7 @@ class MainActivity : ComponentActivity() {
             val ua = result.data?.getStringExtra("user_agent") ?: ""
             if (cookies.isBlank() || ua.isBlank()) {
                 Toast.makeText(this, "访问验证失败，请重试", Toast.LENGTH_SHORT).show()
+                loadHomeIfEmpty()
                 return@registerForActivityResult
             }
 
@@ -181,6 +182,7 @@ class MainActivity : ComponentActivity() {
             }
         } else {
             Toast.makeText(this, "访问验证已取消", Toast.LENGTH_SHORT).show()
+            loadHomeIfEmpty()
         }
     }
 
@@ -670,11 +672,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startInitialLoad() {
-        if (cookieManager.getAsgfp2().isEmpty()) {
-            refreshCookies()
-            return
-        }
-
         lifecycleScope.launch {
             val shouldWaitForProxy = restoreProxyIfNeeded()
             if (shouldWaitForProxy) {
@@ -683,6 +680,13 @@ class MainActivity : ComponentActivity() {
                         .first { it }
                 }
             }
+            viewModel.loadPosts()
+        }
+    }
+
+    private fun loadHomeIfEmpty() {
+        val homeState = viewModel.state.value
+        if (homeState.sections.isEmpty() && !homeState.isLoading && homeState.error == null) {
             viewModel.loadPosts()
         }
     }
