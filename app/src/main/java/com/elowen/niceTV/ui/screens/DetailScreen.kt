@@ -100,6 +100,7 @@ fun DetailScreen(
     isCommentPosting: Boolean = false,
     commentError: String? = null,
     isLoggedIn: Boolean = false,
+    hasAccessCookies: Boolean = false,
     onToggleFavorite: () -> Unit = {},
     onSubmitComment: (String) -> Unit = {},
     onLikeComment: (String) -> Unit = {},
@@ -146,14 +147,25 @@ fun DetailScreen(
 
     var playerErrorMessage by remember { mutableStateOf<String?>(null) }
     var failedServerUrls by remember(detail.postLink) { mutableStateOf<Set<String>>(emptySet()) }
+    var accessPromptedForUrl by remember(detail.postLink) { mutableStateOf<String?>(null) }
     val currentVideoUrlForErrors by rememberUpdatedState(detail.videoUrl)
+    val hasAccessCookiesState by rememberUpdatedState(hasAccessCookies)
+    val onRefreshAccessState by rememberUpdatedState(onRefreshAccess)
 
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                playerErrorMessage = playerErrorText(error)
+                val rawError = playbackErrorRaw(error)
+                playerErrorMessage = playerErrorText(rawError)
                 currentVideoUrlForErrors?.let { failedUrl ->
                     failedServerUrls = failedServerUrls + failedUrl
+                    if (!hasAccessCookiesState &&
+                        isLikelyAccessFailure(rawError) &&
+                        accessPromptedForUrl != failedUrl
+                    ) {
+                        accessPromptedForUrl = failedUrl
+                        onRefreshAccessState()
+                    }
                 }
             }
 
@@ -754,8 +766,15 @@ private fun PlayerErrorOverlay(
     }
 }
 
-private fun playerErrorText(error: PlaybackException): String {
-    val raw = error.message.orEmpty().lowercase(java.util.Locale.ROOT)
+private fun playbackErrorRaw(error: PlaybackException): String {
+    return listOf(
+        error.message.orEmpty(),
+        error.cause?.message.orEmpty(),
+        error.cause?.cause?.message.orEmpty()
+    ).joinToString(" ").lowercase(java.util.Locale.ROOT)
+}
+
+private fun playerErrorText(raw: String): String {
     return when {
         raw.contains("timeout") || raw.contains("timed out") ->
             "播放请求超时，请重试或切换线路"
@@ -763,10 +782,20 @@ private fun playerErrorText(error: PlaybackException): String {
             "当前线路无法访问，请切换线路或重新验证访问"
         raw.contains("404") || raw.contains("not found") ->
             "当前线路资源不存在，请切换线路"
+        isLikelyAccessFailure(raw) ->
+            "播放连接被关闭，可能缺少访问验证，请重新验证访问"
         raw.contains("behind live window") ->
             "播放位置已失效，请重试"
         else -> "播放失败，请重试或切换线路"
     }
+}
+
+private fun isLikelyAccessFailure(raw: String): Boolean {
+    return raw.contains("connection closed") ||
+        raw.contains("connection reset") ||
+        raw.contains("unexpected end") ||
+        raw.contains("unexpected end of stream") ||
+        raw.contains("stream was reset")
 }
 
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])

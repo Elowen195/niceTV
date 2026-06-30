@@ -16,6 +16,7 @@ class CookieManager(context: Context) {
     }
     fun getAsgfp2() = SecurePrefs.getEncryptedString(prefs, "asgfp2", "").orEmpty()
     fun getCfClearance() = SecurePrefs.getEncryptedString(prefs, "cf_clearance", "").orEmpty()
+    fun hasAccessCookies() = getAsgfp2().isNotBlank() || getCfClearance().isNotBlank()
     fun getUserAgent() =
         SecurePrefs.getEncryptedString(prefs, "user_agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36").orEmpty()
     // [NEW] Global Referer store for Media3 playback

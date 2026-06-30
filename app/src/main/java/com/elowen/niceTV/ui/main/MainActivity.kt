@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
     private var continueWatchingPost by mutableStateOf<Post?>(null)
     private var continueWatchingProgressText by mutableStateOf<String?>(null)
     private var watchHistoryPosts by mutableStateOf<List<Post>>(emptyList())
+    private var hasAccessCookies by mutableStateOf(false)
 
     private data class ListReturnTarget(
         val navState: NavigationState,
@@ -165,6 +166,7 @@ class MainActivity : ComponentActivity() {
                 cfClearance = cookieMap["cf_clearance"] ?: ""
             )
             cookieManager.saveUserAgent(ua)
+            hasAccessCookies = cookieManager.hasAccessCookies()
 
             viewModel.onCookieRefreshed()
             selectedUrl?.let { detailViewModel.loadDetail(it) }
@@ -196,6 +198,7 @@ class MainActivity : ComponentActivity() {
         )
         val db = com.elowen.niceTV.data.db.AppDatabase.getDatabase(this)
         cookieManager = CookieManager(this)
+        hasAccessCookies = cookieManager.hasAccessCookies()
         com.elowen.niceTV.data.network.HttpClient.init(cookieManager)
         val scraper = HtmlScraper()
         val backendApi = BackendApiClient()
@@ -567,6 +570,7 @@ class MainActivity : ComponentActivity() {
                                         isCommentPosting = detailState.isCommentPosting,
                                         commentError = detailState.commentError,
                                         isLoggedIn = authState.isLoggedIn,
+                                        hasAccessCookies = hasAccessCookies,
                                         onToggleFavorite = { detailViewModel.toggleFavorite() },
                                         onSubmitComment = { detailViewModel.submitComment(it) },
                                         onLikeComment = { detailViewModel.likeComment(it) },

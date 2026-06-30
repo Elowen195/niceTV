@@ -323,7 +323,7 @@ class WebViewActivity : AppCompatActivity() {
     }
 
     private fun hasRequiredAccessCookies(cookies: String?): Boolean {
-        return cookies?.contains("cf_clearance") == true && cookies.contains("asgfp2")
+        return cookies?.contains("cf_clearance") == true || cookies?.contains("asgfp2") == true
     }
 
     private fun finishIfAccessVerified(url: String?): Boolean {
