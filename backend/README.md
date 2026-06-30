@@ -33,6 +33,19 @@ Health check:
 curl http://127.0.0.1:8080/healthz
 ```
 
+## Docker Image
+
+GitHub Actions publishes the backend image to:
+
+```text
+ghcr.io/elowen195/nicetv-backend
+```
+
+Tags:
+
+- Push to `main`: `latest`, `main`, and `sha-<commit>`.
+- Push a version tag like `v1.0.0`: `v1.0.0`, `1.0.0`, and `1.0`.
+
 ## Local Run
 
 Start only PostgreSQL:
