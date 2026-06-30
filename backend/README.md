@@ -23,6 +23,7 @@ Go + Chi + PostgreSQL backend for NiceTV accounts, cloud favorites sync, comment
 Start PostgreSQL and API:
 
 ```powershell
+Copy-Item .env.example .env
 docker compose up --build
 ```
 
@@ -64,24 +65,39 @@ docker compose up -d --build
 Keep production secrets in a local `.env` file or in the shell environment, not in Git:
 
 ```bash
-DATABASE_URL=postgres://nicetv:nicetv@postgres:5432/nicetv?sslmode=disable
+POSTGRES_PASSWORD=replace-with-a-long-random-password
 JWT_SECRET=replace-with-a-long-random-secret
+CORS_ORIGIN=https://api.linux-de.me
 ```
 
 GitHub Actions only checks that tests pass and the Docker image can build.
+
+Security templates and operations scripts:
+
+```bash
+sudo cp deploy/nginx/nicetv-api-http.conf /etc/nginx/conf.d/nicetv-api-http.conf
+sudo cp deploy/nginx/nicetv-api-site.conf /etc/nginx/sites-available/nicetv-api
+sudo ln -sf /etc/nginx/sites-available/nicetv-api /etc/nginx/sites-enabled/nicetv-api
+sudo nginx -t && sudo systemctl reload nginx
+scripts/security-check.sh
+scripts/backup-postgres.sh
+```
+
+See `docs/SECURITY_PLAN.md` for the full production checklist.
 
 ## Local Run
 
 Start only PostgreSQL:
 
 ```powershell
-docker compose up -d postgres
+Copy-Item .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
 ```
 
 Run the API:
 
 ```powershell
-$env:DATABASE_URL="postgres://nicetv:nicetv@127.0.0.1:5432/nicetv?sslmode=disable"
+$env:DATABASE_URL="postgres://nicetv:replace-with-a-long-random-password@127.0.0.1:5432/nicetv?sslmode=disable"
 $env:JWT_SECRET="dev-secret"
 go run ./cmd/server
 ```

@@ -26,5 +26,6 @@ app/release/
 app/import requests.py
 nu_
 backend/.env
+backend/backups/
 backend/*.exe
 backend/*.test

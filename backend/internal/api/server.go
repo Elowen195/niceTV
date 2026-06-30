@@ -18,17 +18,19 @@ import (
 )
 
 type Server struct {
-	cfg   config.Config
-	store store.Store
+	cfg     config.Config
+	store   store.Store
+	limiter *rateLimiter
 }
 
 func NewServer(cfg config.Config, store store.Store) *Server {
-	return &Server{cfg: cfg, store: store}
+	return &Server{cfg: cfg, store: store, limiter: newRateLimiter()}
 }
 
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.cors)
+	r.Use(s.rateLimit)
 	r.Use(recoverer)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
