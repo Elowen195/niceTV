@@ -46,6 +46,8 @@ func (s *Server) Routes() http.Handler {
 
 		r.Post("/video-refs", s.handleUpsertVideoRef)
 		r.Get("/video-refs/{videoRefID}/comments", s.handleListComments)
+		r.Get("/collections/public", s.handleListPublicCollections)
+		r.Get("/collections/{idOrSlug}", s.handleGetCollection)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.authRequired)
@@ -63,6 +65,15 @@ func (s *Server) Routes() http.Handler {
 			r.Delete("/comments/{commentID}", s.handleDeleteComment)
 			r.Put("/comments/{commentID}/like", s.handleLikeComment)
 			r.Delete("/comments/{commentID}/like", s.handleUnlikeComment)
+
+			r.Get("/collections/mine", s.handleListMyCollections)
+			r.Get("/collections/mine/{idOrSlug}", s.handleGetMyCollection)
+			r.Post("/collections", s.handleCreateCollection)
+			r.Patch("/collections/{collectionID}", s.handleUpdateCollection)
+			r.Delete("/collections/{collectionID}", s.handleDeleteCollection)
+			r.Post("/collections/{collectionID}/items", s.handleAddCollectionItem)
+			r.Delete("/collections/{collectionID}/items/{itemID}", s.handleRemoveCollectionItem)
+			r.Post("/collections/{idOrSlug}/copy", s.handleCopyCollection)
 		})
 	})
 

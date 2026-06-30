@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -31,7 +32,9 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Downloading
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -71,6 +74,7 @@ import com.elowen.niceTV.data.model.Post
 import com.elowen.niceTV.data.model.VideoDetail
 import com.elowen.niceTV.data.model.VideoSource
 import com.elowen.niceTV.data.backend.CommentItem
+import com.elowen.niceTV.data.backend.VideoCollection
 import com.elowen.niceTV.data.manager.CacheKeyUtil
 import com.elowen.niceTV.ui.components.VideoCard
 import com.elowen.niceTV.data.network.CookieManager
@@ -101,7 +105,13 @@ fun DetailScreen(
     commentError: String? = null,
     isLoggedIn: Boolean = false,
     hasAccessCookies: Boolean = false,
+    collections: List<VideoCollection> = emptyList(),
+    areCollectionsLoading: Boolean = false,
+    isAddingToCollection: Boolean = false,
+    collectionMessage: String? = null,
+    collectionError: String? = null,
     onToggleFavorite: () -> Unit = {},
+    onAddToCollection: (String) -> Unit = {},
     onSubmitComment: (String) -> Unit = {},
     onLikeComment: (String) -> Unit = {},
     onStartDownload: () -> Unit = {},
@@ -122,6 +132,7 @@ fun DetailScreen(
     val context = LocalContext.current
     val activity = context as? Activity
     val isTablet = with(LocalDensity.current) { windowInfo.containerSize.width.toDp() } >= 600.dp
+    var showCollectionPicker by remember { mutableStateOf(false) }
 
     val safeCacheProgress = if (downloadProgress >= 0f) downloadProgress else 0f
 
@@ -256,6 +267,18 @@ fun DetailScreen(
 
     BackHandler(enabled = isFullScreen) {
         isFullScreen = false
+    }
+
+    if (showCollectionPicker) {
+        AddToCollectionDialog(
+            collections = collections,
+            isLoading = areCollectionsLoading,
+            isAdding = isAddingToCollection,
+            message = collectionMessage,
+            error = collectionError,
+            onDismiss = { showCollectionPicker = false },
+            onAdd = onAddToCollection
+        )
     }
 
     val nextServerName = remember(detail.servers, detail.videoUrl) {
@@ -399,7 +422,9 @@ fun DetailScreen(
                                         downloadBytes = downloadBytes,
                                         isOffline = isOffline,
                                         onStartDownload = onStartDownload,
-                                        onOpenDownloads = onOpenDownloads
+                                        onOpenDownloads = onOpenDownloads,
+                                        canAddToCollection = isLoggedIn && !isOffline,
+                                        onOpenCollectionPicker = { showCollectionPicker = true }
                                     )
                                     ServerSelector(detail.servers, detail.videoUrl, failedServerUrls, switchServer)
                                     Spacer(modifier = Modifier.height(16.dp))
@@ -565,7 +590,9 @@ fun DetailScreen(
                                     downloadBytes = downloadBytes,
                                     isOffline = isOffline,
                                     onStartDownload = onStartDownload,
-                                    onOpenDownloads = onOpenDownloads
+                                    onOpenDownloads = onOpenDownloads,
+                                    canAddToCollection = isLoggedIn && !isOffline,
+                                    onOpenCollectionPicker = { showCollectionPicker = true }
                                 )
                                 ServerSelector(detail.servers, detail.videoUrl, failedServerUrls, switchServer)
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -725,6 +752,91 @@ private fun DetailCommentsSection(
 }
 
 @Composable
+private fun AddToCollectionDialog(
+    collections: List<VideoCollection>,
+    isLoading: Boolean,
+    isAdding: Boolean,
+    message: String?,
+    error: String?,
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("加入清单") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when {
+                    isLoading -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("正在加载清单...")
+                        }
+                    }
+                    collections.isEmpty() -> {
+                        Text("还没有清单，先到我的页面新建一个。", color = Color.Gray)
+                    }
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(collections) { collection ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                                        .clickable(enabled = !isAdding) { onAdd(collection.id) }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                                        contentDescription = null,
+                                        tint = Color.Cyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            collection.title,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "${collection.itemCount} 条 · ${collection.visibility}",
+                                            color = Color.Gray,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (isAdding) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在加入...")
+                    }
+                }
+                message?.let { Text(it, color = Color.Cyan, style = MaterialTheme.typography.bodySmall) }
+                error?.let { Text(it, color = Color.Red, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("完成")
+            }
+        }
+    )
+}
+
+@Composable
 private fun PlayerErrorOverlay(
     message: String,
     onRetry: () -> Unit,
@@ -808,9 +920,14 @@ fun ActionRow(
     downloadBytes: Long,
     isOffline: Boolean,
     onStartDownload: () -> Unit,
-    onOpenDownloads: () -> Unit
+    onOpenDownloads: () -> Unit,
+    canAddToCollection: Boolean,
+    onOpenCollectionPicker: () -> Unit
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         AssistChip(
             onClick = onToggleFavorite,
             label = {
@@ -877,6 +994,23 @@ fun ActionRow(
             border = AssistChipDefaults.assistChipBorder(
                 enabled = true,
                 borderColor = color.copy(alpha = 0.3f)
+            )
+        )
+
+        AssistChip(
+            enabled = canAddToCollection,
+            onClick = onOpenCollectionPicker,
+            label = { Text("加入清单", color = if (canAddToCollection) Color.White else Color.Gray) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.PlaylistAdd,
+                    contentDescription = "Add to collection",
+                    tint = if (canAddToCollection) Color.Cyan else Color.Gray
+                )
+            },
+            border = AssistChipDefaults.assistChipBorder(
+                enabled = true,
+                borderColor = if (canAddToCollection) Color.Cyan.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.3f)
             )
         )
     }

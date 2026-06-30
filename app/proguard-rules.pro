@@ -28,6 +28,7 @@
 -dontwarn sun.misc.**
 -keep class com.google.gson.** { *; }
 -keep class com.elowen.niceTV.data.model.** { *; }
+-keep class com.elowen.niceTV.data.backend.** { *; }
 
 # Jsoup optional dependencies (Re2j)
 -dontwarn com.google.re2j.**

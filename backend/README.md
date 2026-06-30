@@ -1,6 +1,6 @@
 # NiceTV Backend
 
-Go + Chi + PostgreSQL backend for NiceTV accounts, cloud favorites sync, and comments.
+Go + Chi + PostgreSQL backend for NiceTV accounts, cloud favorites sync, comments, and shared collections.
 
 ## Features
 
@@ -10,6 +10,7 @@ Go + Chi + PostgreSQL backend for NiceTV accounts, cloud favorites sync, and com
 - Video page references.
 - Cloud favorites with incremental sync and tombstones.
 - Comments, replies, soft delete, likes.
+- Shared video collections with private, unlisted, and public visibility.
 
 ## Requirements
 
@@ -39,6 +40,13 @@ On the VPS, pull the latest code and rebuild locally:
 
 ```bash
 git pull
+docker compose up -d --build
+```
+
+If the PostgreSQL volume already exists, apply new migrations before rebuilding the API:
+
+```bash
+docker compose exec -T postgres psql -U nicetv -d nicetv < migrations/002_collections.sql
 docker compose up -d --build
 ```
 
@@ -98,6 +106,8 @@ POST /v1/auth/refresh
 POST /v1/auth/logout
 POST /v1/video-refs
 GET  /v1/video-refs/{videoRefId}/comments
+GET  /v1/collections/public
+GET  /v1/collections/{idOrSlug}
 ```
 
 Authenticated:
@@ -114,6 +124,14 @@ PATCH  /v1/comments/{commentId}
 DELETE /v1/comments/{commentId}
 PUT    /v1/comments/{commentId}/like
 DELETE /v1/comments/{commentId}/like
+GET    /v1/collections/mine
+GET    /v1/collections/mine/{idOrSlug}
+POST   /v1/collections
+PATCH  /v1/collections/{collectionId}
+DELETE /v1/collections/{collectionId}
+POST   /v1/collections/{collectionId}/items
+DELETE /v1/collections/{collectionId}/items/{itemId}
+POST   /v1/collections/{idOrSlug}/copy
 ```
 
 Use authenticated endpoints with:

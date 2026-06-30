@@ -75,9 +75,11 @@ import androidx.lifecycle.lifecycleScope
 import com.elowen.niceTV.core.BoxManager
 import com.elowen.niceTV.core.NetworkRestrictionManager
 import com.elowen.niceTV.core.platform.proxy.ProxyRuntimeConfig
+import com.elowen.niceTV.ui.viewmodel.CollectionsViewModel
 import com.elowen.niceTV.ui.viewmodel.DetailViewModel
 import com.elowen.niceTV.ui.viewmodel.AuthUiState
 import com.elowen.niceTV.ui.viewmodel.AuthViewModel
+import com.elowen.niceTV.ui.viewmodel.CollectionsUiState
 import com.elowen.niceTV.data.model.VideoDetail
 import com.elowen.niceTV.data.model.Post
 import com.elowen.niceTV.service.ProxyService
@@ -111,6 +113,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var detailViewModel: DetailViewModel
     private lateinit var videoListViewModel: VideoListViewModel
     private lateinit var authViewModel: AuthViewModel
+    private lateinit var collectionsViewModel: CollectionsViewModel
     private lateinit var cookieManager: CookieManager
 
     private var selectedUrl by mutableStateOf<String?>(null)
@@ -215,6 +218,7 @@ class MainActivity : ComponentActivity() {
         detailViewModel = DetailViewModel(repository, downloadRepository, backendRepository, authRepository)
         videoListViewModel = VideoListViewModel(repository, tagRepository)
         authViewModel = AuthViewModel(authRepository, repository)
+        collectionsViewModel = CollectionsViewModel(backendRepository, authRepository)
         val favoriteViewModel = com.elowen.niceTV.ui.viewmodel.FavoriteViewModel(repository)
         
 
@@ -232,6 +236,7 @@ class MainActivity : ComponentActivity() {
             val videoListState by videoListViewModel.state
             val favoriteState by favoriteViewModel.state
             val authState by authViewModel.state
+            val collectionsState by collectionsViewModel.state
             val runWithNotificationPermission = rememberNotificationPermissionGate(
                 deniedMessage = "未授予通知权限，下载仍会开始，但后台进度通知可能不可见"
             )
@@ -247,6 +252,9 @@ class MainActivity : ComponentActivity() {
                 com.elowen.niceTV.data.network.HttpClient.cookieExpiredFlow.collect {
                     refreshCookies()
                 }
+            }
+            LaunchedEffect(authState.session?.userId) {
+                collectionsViewModel.refreshAll()
             }
             LaunchedEffect(
                 detailState.detail?.postLink,
@@ -347,6 +355,7 @@ class MainActivity : ComponentActivity() {
                                                favoriteState = favoriteState,
                                                favoriteViewModel = favoriteViewModel,
                                                authState = authState,
+                                               collectionsState = collectionsState,
                                                continueWatchingPost = continueWatchingPost,
                                                continueWatchingProgressText = continueWatchingProgressText,
                                                watchHistoryPosts = watchHistoryPosts,
@@ -394,7 +403,13 @@ class MainActivity : ComponentActivity() {
                                                onLogin = { login, password -> authViewModel.login(login, password) },
                                                onRegister = { username, password -> authViewModel.register(username, password) },
                                                onLogout = { authViewModel.logout() },
-                                               onSyncFavorites = { authViewModel.syncFavorites() }
+                                               onSyncFavorites = { authViewModel.syncFavorites() },
+                                               onRefreshCollections = { collectionsViewModel.refreshAll() },
+                                               onCreateCollection = { title, description, visibility ->
+                                                   collectionsViewModel.createCollection(title, description, visibility)
+                                               },
+                                               onSelectCollection = { collectionsViewModel.selectCollection(it) },
+                                               onCopyCollection = { collectionsViewModel.copyCollection(it) }
                                          )
                                      }
                                 }
@@ -445,6 +460,7 @@ class MainActivity : ComponentActivity() {
                                               favoriteState = favoriteState,
                                               favoriteViewModel = favoriteViewModel,
                                               authState = authState,
+                                              collectionsState = collectionsState,
                                               continueWatchingPost = continueWatchingPost,
                                               continueWatchingProgressText = continueWatchingProgressText,
                                               watchHistoryPosts = watchHistoryPosts,
@@ -492,7 +508,13 @@ class MainActivity : ComponentActivity() {
                                              onLogin = { login, password -> authViewModel.login(login, password) },
                                              onRegister = { username, password -> authViewModel.register(username, password) },
                                              onLogout = { authViewModel.logout() },
-                                             onSyncFavorites = { authViewModel.syncFavorites() }
+                                             onSyncFavorites = { authViewModel.syncFavorites() },
+                                             onRefreshCollections = { collectionsViewModel.refreshAll() },
+                                             onCreateCollection = { title, description, visibility ->
+                                                 collectionsViewModel.createCollection(title, description, visibility)
+                                             },
+                                             onSelectCollection = { collectionsViewModel.selectCollection(it) },
+                                             onCopyCollection = { collectionsViewModel.copyCollection(it) }
                                          )
                                     }
                                 }
@@ -571,7 +593,17 @@ class MainActivity : ComponentActivity() {
                                         commentError = detailState.commentError,
                                         isLoggedIn = authState.isLoggedIn,
                                         hasAccessCookies = hasAccessCookies,
+                                        collections = collectionsState.myCollections,
+                                        areCollectionsLoading = collectionsState.isLoading,
+                                        isAddingToCollection = collectionsState.isAdding,
+                                        collectionMessage = collectionsState.message,
+                                        collectionError = collectionsState.error,
                                         onToggleFavorite = { detailViewModel.toggleFavorite() },
+                                        onAddToCollection = { collectionId ->
+                                            currentDetail?.let { detail ->
+                                                collectionsViewModel.addCurrentDetailToCollection(collectionId, detail)
+                                            }
+                                        },
                                         onSubmitComment = { detailViewModel.submitComment(it) },
                                         onLikeComment = { detailViewModel.likeComment(it) },
                                         onStartDownload = {
@@ -1204,6 +1236,7 @@ fun ContentArea(
     favoriteState: com.elowen.niceTV.ui.viewmodel.FavoriteState,
     favoriteViewModel: com.elowen.niceTV.ui.viewmodel.FavoriteViewModel,
     authState: AuthUiState,
+    collectionsState: CollectionsUiState,
     continueWatchingPost: Post?,
     continueWatchingProgressText: String?,
     watchHistoryPosts: List<Post>,
@@ -1221,7 +1254,11 @@ fun ContentArea(
     onLogin: (String, String) -> Unit,
     onRegister: (String, String) -> Unit,
     onLogout: () -> Unit,
-    onSyncFavorites: () -> Unit
+    onSyncFavorites: () -> Unit,
+    onRefreshCollections: () -> Unit,
+    onCreateCollection: (String, String, String) -> Unit,
+    onSelectCollection: (com.elowen.niceTV.data.backend.VideoCollection) -> Unit,
+    onCopyCollection: (com.elowen.niceTV.data.backend.VideoCollection) -> Unit
 ) {
     when (navState) {
         is NavigationState.Home -> {
@@ -1242,10 +1279,16 @@ fun ContentArea(
         is NavigationState.User -> {
              com.elowen.niceTV.ui.screens.UserScreen(
                  authState = authState,
+                 collectionsState = collectionsState,
                  onLogin = onLogin,
                  onRegister = onRegister,
                  onLogout = onLogout,
-                 onSyncFavorites = onSyncFavorites
+                 onSyncFavorites = onSyncFavorites,
+                 onRefreshCollections = onRefreshCollections,
+                 onCreateCollection = onCreateCollection,
+                 onSelectCollection = onSelectCollection,
+                 onCopyCollection = onCopyCollection,
+                 onCollectionPostClick = onPostClick
              )
         }
 

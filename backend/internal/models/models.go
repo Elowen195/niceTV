@@ -65,6 +65,36 @@ type Comment struct {
 	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
 }
 
+type Collection struct {
+	ID            string    `json:"id"`
+	OwnerID       string    `json:"ownerId"`
+	OwnerUsername string    `json:"ownerUsername"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	CoverURL      *string   `json:"coverUrl,omitempty"`
+	Visibility    string    `json:"visibility"`
+	Slug          string    `json:"slug"`
+	ItemCount     int       `json:"itemCount"`
+	LikeCount     int       `json:"likeCount"`
+	SaveCount     int       `json:"saveCount"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type CollectionItem struct {
+	ID           string    `json:"id"`
+	CollectionID string    `json:"collectionId"`
+	VideoRef     VideoRef  `json:"videoRef"`
+	Note         string    `json:"note"`
+	Position     int       `json:"position"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type CollectionDetail struct {
+	Collection Collection       `json:"collection"`
+	Items      []CollectionItem `json:"items"`
+}
+
 type FavoriteSnapshot struct {
 	Title    string   `json:"title"`
 	CoverURL *string  `json:"coverUrl,omitempty"`

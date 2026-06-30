@@ -91,6 +91,67 @@ class BackendRepository(
         }
     }
 
+    suspend fun listMyCollections(): List<VideoCollection> {
+        return authRepository.authorized { token ->
+            api.listMyCollections(token)
+        } ?: emptyList()
+    }
+
+    suspend fun listPublicCollections(): List<VideoCollection> {
+        return api.listPublicCollections()
+    }
+
+    suspend fun getCollectionDetail(collection: VideoCollection): CollectionDetail {
+        val key = collection.slug.ifBlank { collection.id }
+        val isMine = authRepository.currentSession()?.userId == collection.ownerId
+        if (!isMine) {
+            return api.getCollection(key)
+        }
+        return authRepository.authorized { token ->
+            api.getMyCollection(token, collection.id)
+        } ?: api.getCollection(key)
+    }
+
+    suspend fun createCollection(
+        title: String,
+        description: String,
+        visibility: String,
+        coverUrl: String? = null
+    ): VideoCollection? {
+        return authRepository.authorized { token ->
+            api.createCollection(
+                accessToken = token,
+                title = title,
+                description = description,
+                visibility = visibility,
+                coverUrl = coverUrl
+            )
+        }
+    }
+
+    suspend fun addDetailToCollection(collectionId: String, detail: VideoDetail): CollectionItem? {
+        val sourceUrl = detail.postLink.takeIf { it.startsWith("http") } ?: return null
+        return authRepository.authorized { token ->
+            api.addCollectionItem(
+                accessToken = token,
+                collectionId = collectionId,
+                request = AddCollectionItemRequest(
+                    sourceUrl = sourceUrl,
+                    title = detail.title,
+                    coverUrl = detail.imageUrl.takeIf { it.isNotBlank() },
+                    maker = detail.maker.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }
+
+    suspend fun copyCollection(collection: VideoCollection): VideoCollection? {
+        val key = collection.slug.ifBlank { collection.id }
+        return authRepository.authorized { token ->
+            api.copyCollection(token, key)
+        }
+    }
+
     private fun VideoDetail.favoriteSnapshot(): FavoriteSnapshot {
         return FavoriteSnapshot(
             title = title,

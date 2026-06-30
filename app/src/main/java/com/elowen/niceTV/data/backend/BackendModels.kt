@@ -136,3 +136,61 @@ data class CreateCommentRequest(
     val body: String
 )
 
+data class VideoCollection(
+    val id: String = "",
+    val ownerId: String = "",
+    val ownerUsername: String = "",
+    val title: String = "",
+    val description: String = "",
+    val coverUrl: String? = null,
+    val visibility: String = "private",
+    val slug: String = "",
+    val itemCount: Int = 0,
+    val likeCount: Int = 0,
+    val saveCount: Int = 0,
+    val createdAt: String = "",
+    val updatedAt: String = ""
+)
+
+data class CollectionItem(
+    val id: String = "",
+    val collectionId: String = "",
+    val videoRef: VideoRef = VideoRef(),
+    val note: String = "",
+    val position: Int = 0,
+    val createdAt: String = ""
+)
+
+data class CollectionDetail(
+    val collection: VideoCollection = VideoCollection(),
+    val items: List<CollectionItem> = emptyList()
+)
+
+data class CollectionsEnvelope(
+    val collections: List<VideoCollection> = emptyList()
+)
+
+data class CollectionEnvelope(
+    val collection: VideoCollection = VideoCollection()
+)
+
+data class CollectionItemEnvelope(
+    val item: CollectionItem = CollectionItem()
+)
+
+data class CollectionRequest(
+    val title: String,
+    val description: String = "",
+    val coverUrl: String? = null,
+    val visibility: String = "public"
+)
+
+data class AddCollectionItemRequest(
+    val source: String = "supjav",
+    val sourceUrl: String,
+    val title: String,
+    val coverUrl: String? = null,
+    val maker: String? = null,
+    val note: String = "",
+    val position: Int? = null
+)

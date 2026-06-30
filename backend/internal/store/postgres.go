@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"nicetv/backend/internal/models"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -407,6 +409,239 @@ func (p *Postgres) UnlikeComment(ctx context.Context, userID, commentID string) 
 	return p.commentByID(ctx, commentID)
 }
 
+func (p *Postgres) CreateCollection(ctx context.Context, ownerID, title, description string, coverURL *string, visibility string) (models.Collection, error) {
+	if visibility == "" {
+		visibility = "private"
+	}
+	for attempts := 0; attempts < 3; attempts++ {
+		slug := newCollectionSlug()
+		row := p.pool.QueryRow(ctx, `
+			insert into collections (owner_id, title, description, cover_url, visibility, slug)
+			values ($1, $2, $3, $4, $5, $6)
+			returning id
+		`, ownerID, title, description, coverURL, visibility, slug)
+		var id string
+		if err := row.Scan(&id); err != nil {
+			mapped := mapError(err)
+			if errors.Is(mapped, ErrConflict) {
+				continue
+			}
+			return models.Collection{}, mapped
+		}
+		return p.collectionByID(ctx, id)
+	}
+	return models.Collection{}, ErrConflict
+}
+
+func (p *Postgres) UpdateCollection(ctx context.Context, ownerID, collectionID string, title, description, coverURL, visibility *string) (models.Collection, error) {
+	row := p.pool.QueryRow(ctx, `
+		update collections
+		set title = coalesce(nullif($3, ''), title),
+		    description = case when $4::text is null then description else $4 end,
+		    cover_url = case when $5::text is null then cover_url when $5 = '' then null else $5 end,
+		    visibility = coalesce(nullif($6, ''), visibility),
+		    updated_at = now()
+		where id = $1 and owner_id = $2
+		returning id
+	`, collectionID, ownerID, title, description, coverURL, visibility)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return models.Collection{}, mapError(err)
+	}
+	return p.collectionByID(ctx, id)
+}
+
+func (p *Postgres) DeleteCollection(ctx context.Context, ownerID, collectionID string) error {
+	tag, err := p.pool.Exec(ctx, `
+		delete from collections
+		where id = $1 and owner_id = $2
+	`, collectionID, ownerID)
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) ListMyCollections(ctx context.Context, ownerID string, limit int) ([]models.Collection, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
+		where c.owner_id = $1
+		order by c.updated_at desc
+		limit $2
+	`, ownerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCollections(rows)
+}
+
+func (p *Postgres) ListPublicCollections(ctx context.Context, limit int) ([]models.Collection, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
+		where c.visibility = 'public'
+		order by c.updated_at desc
+		limit $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCollections(rows)
+}
+
+func (p *Postgres) GetCollection(ctx context.Context, viewerID *string, idOrSlug string) (models.CollectionDetail, error) {
+	collection, err := p.collectionByIDOrSlug(ctx, viewerID, idOrSlug)
+	if err != nil {
+		return models.CollectionDetail{}, err
+	}
+	rows, err := p.pool.Query(ctx, collectionItemSelectSQL+`
+		where ci.collection_id = $1
+		order by ci.position asc, ci.created_at asc
+	`, collection.ID)
+	if err != nil {
+		return models.CollectionDetail{}, err
+	}
+	defer rows.Close()
+	items, err := scanCollectionItems(rows)
+	if err != nil {
+		return models.CollectionDetail{}, err
+	}
+	return models.CollectionDetail{Collection: collection, Items: items}, nil
+}
+
+func (p *Postgres) AddCollectionItem(ctx context.Context, ownerID, collectionID, videoRefID, note string, position *int) (models.CollectionItem, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return models.CollectionItem{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from collections where id = $1 and owner_id = $2)`, collectionID, ownerID).Scan(&exists); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	if !exists {
+		return models.CollectionItem{}, ErrNotFound
+	}
+
+	nextPosition := 0
+	if position != nil {
+		nextPosition = *position
+	} else if err := tx.QueryRow(ctx, `select coalesce(max(position), -1) + 1 from collection_items where collection_id = $1`, collectionID).Scan(&nextPosition); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		insert into collection_items (collection_id, video_ref_id, note, position)
+		values ($1, $2, $3, $4)
+		on conflict (collection_id, video_ref_id) do update
+		set note = excluded.note,
+		    position = excluded.position
+		returning id, (xmax = 0) as inserted
+	`, collectionID, videoRefID, note, nextPosition)
+	var id string
+	var inserted bool
+	if err := row.Scan(&id, &inserted); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	if inserted {
+		if _, err := tx.Exec(ctx, `update collections set item_count = item_count + 1, updated_at = now() where id = $1`, collectionID); err != nil {
+			return models.CollectionItem{}, mapError(err)
+		}
+	} else if _, err := tx.Exec(ctx, `update collections set updated_at = now() where id = $1`, collectionID); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	return p.collectionItemByID(ctx, id)
+}
+
+func (p *Postgres) RemoveCollectionItem(ctx context.Context, ownerID, collectionID, itemID string) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		delete from collection_items ci
+		using collections c
+		where ci.id = $1 and ci.collection_id = $2 and c.id = ci.collection_id and c.owner_id = $3
+	`, itemID, collectionID, ownerID)
+	if err != nil {
+		return mapError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `
+		update collections
+		set item_count = greatest(item_count - 1, 0), updated_at = now()
+		where id = $1 and owner_id = $2
+	`, collectionID, ownerID); err != nil {
+		return mapError(err)
+	}
+	return mapError(tx.Commit(ctx))
+}
+
+func (p *Postgres) CopyCollection(ctx context.Context, ownerID, idOrSlug string) (models.Collection, error) {
+	source, err := p.collectionByIDOrSlug(ctx, &ownerID, idOrSlug)
+	if err != nil {
+		return models.Collection{}, err
+	}
+
+	for attempts := 0; attempts < 3; attempts++ {
+		tx, err := p.pool.Begin(ctx)
+		if err != nil {
+			return models.Collection{}, err
+		}
+
+		var newID string
+		row := tx.QueryRow(ctx, `
+			insert into collections (owner_id, title, description, cover_url, visibility, slug)
+			values ($1, $2, $3, $4, 'private', $5)
+			returning id
+		`, ownerID, source.Title+" 的副本", source.Description, source.CoverURL, newCollectionSlug())
+		if err := row.Scan(&newID); err != nil {
+			_ = tx.Rollback(ctx)
+			mapped := mapError(err)
+			if errors.Is(mapped, ErrConflict) {
+				continue
+			}
+			return models.Collection{}, mapped
+		}
+		tag, err := tx.Exec(ctx, `
+			insert into collection_items (collection_id, video_ref_id, note, position)
+			select $1, video_ref_id, note, position
+			from collection_items
+			where collection_id = $2
+			order by position asc, created_at asc
+		`, newID, source.ID)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return models.Collection{}, mapError(err)
+		}
+		if _, err := tx.Exec(ctx, `update collections set item_count = $2 where id = $1`, newID, tag.RowsAffected()); err != nil {
+			_ = tx.Rollback(ctx)
+			return models.Collection{}, mapError(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return models.Collection{}, mapError(err)
+		}
+		return p.collectionByID(ctx, newID)
+	}
+	return models.Collection{}, ErrConflict
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -534,6 +769,117 @@ func scanComments(rows pgx.Rows) ([]models.Comment, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+const collectionSelectSQL = `
+	select c.id, c.owner_id, u.username, c.title, c.description, c.cover_url,
+	       c.visibility, c.slug, c.item_count, c.like_count, c.save_count,
+	       c.created_at, c.updated_at
+	from collections c
+	join users u on u.id = c.owner_id
+`
+
+func (p *Postgres) collectionByID(ctx context.Context, id string) (models.Collection, error) {
+	row := p.pool.QueryRow(ctx, collectionSelectSQL+` where c.id = $1`, id)
+	return scanCollection(row)
+}
+
+func (p *Postgres) collectionByIDOrSlug(ctx context.Context, viewerID *string, idOrSlug string) (models.Collection, error) {
+	row := p.pool.QueryRow(ctx, collectionSelectSQL+`
+		where (c.id::text = $1 or c.slug = $1)
+		  and (c.visibility <> 'private' or ($2::uuid is not null and c.owner_id = $2))
+	`, idOrSlug, viewerID)
+	return scanCollection(row)
+}
+
+func scanCollection(row scanner) (models.Collection, error) {
+	var collection models.Collection
+	err := row.Scan(
+		&collection.ID,
+		&collection.OwnerID,
+		&collection.OwnerUsername,
+		&collection.Title,
+		&collection.Description,
+		&collection.CoverURL,
+		&collection.Visibility,
+		&collection.Slug,
+		&collection.ItemCount,
+		&collection.LikeCount,
+		&collection.SaveCount,
+		&collection.CreatedAt,
+		&collection.UpdatedAt,
+	)
+	if err != nil {
+		return models.Collection{}, mapError(err)
+	}
+	return collection, nil
+}
+
+func scanCollections(rows pgx.Rows) ([]models.Collection, error) {
+	items := make([]models.Collection, 0)
+	for rows.Next() {
+		item, err := scanCollection(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+const collectionItemSelectSQL = `
+	select
+		ci.id, ci.collection_id, ci.note, ci.position, ci.created_at,
+		v.id, v.source, v.source_url, v.title, v.cover_url, v.maker, v.created_at, v.updated_at
+	from collection_items ci
+	join video_refs v on v.id = ci.video_ref_id
+`
+
+func (p *Postgres) collectionItemByID(ctx context.Context, id string) (models.CollectionItem, error) {
+	row := p.pool.QueryRow(ctx, collectionItemSelectSQL+` where ci.id = $1`, id)
+	return scanCollectionItem(row)
+}
+
+func scanCollectionItem(row scanner) (models.CollectionItem, error) {
+	var item models.CollectionItem
+	var video models.VideoRef
+	err := row.Scan(
+		&item.ID,
+		&item.CollectionID,
+		&item.Note,
+		&item.Position,
+		&item.CreatedAt,
+		&video.ID,
+		&video.Source,
+		&video.SourceURL,
+		&video.Title,
+		&video.CoverURL,
+		&video.Maker,
+		&video.CreatedAt,
+		&video.UpdatedAt,
+	)
+	if err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	item.VideoRef = video
+	return item, nil
+}
+
+func scanCollectionItems(rows pgx.Rows) ([]models.CollectionItem, error) {
+	items := make([]models.CollectionItem, 0)
+	for rows.Next() {
+		item, err := scanCollectionItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func newCollectionSlug() string {
+	raw := strings.ReplaceAll(uuid.NewString(), "-", "")
+	return raw[:12]
 }
 
 func mapError(err error) error {

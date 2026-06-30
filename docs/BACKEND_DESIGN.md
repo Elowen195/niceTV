@@ -9,6 +9,7 @@ MVP 先保证功能闭环：
 - 注册、登录、刷新 token、退出登录。
 - 登录用户收藏云同步，支持多设备增量合并。
 - 视频详情页评论、回复、点赞、删除自己的评论。
+- 共享清单：用户把视频整理成私密、链接可见或公开列表，别人可以浏览公开清单并复制到自己的账号。
 - 可在 1c2g VPS 上用 Docker Compose 运行。
 
 ## 技术选型
@@ -31,6 +32,7 @@ MVP 先保证功能闭环：
 - `video_refs` 页面引用。
 - 收藏快照与同步状态。
 - 评论、回复、点赞计数。
+- 用户创建的共享清单、清单条目、公开发现和复制。
 
 后端不负责：
 
@@ -102,6 +104,29 @@ comment_reactions
 - reaction text
 - created_at timestamptz
 - primary key(user_id, comment_id)
+
+collections
+- id uuid pk
+- owner_id uuid fk
+- title text
+- description text
+- cover_url text nullable
+- visibility text: private / unlisted / public
+- slug text unique
+- item_count int
+- like_count int
+- save_count int
+- created_at timestamptz
+- updated_at timestamptz
+
+collection_items
+- id uuid pk
+- collection_id uuid fk
+- video_ref_id uuid fk
+- note text
+- position int
+- created_at timestamptz
+- unique(collection_id, video_ref_id)
 ```
 
 ## API
@@ -196,6 +221,31 @@ DELETE /v1/comments/{commentId}/like
 
 评论正文限制 1 到 1000 字。删除评论为软删除，列表只返回 `visible` 评论。`parent_id` 已预留回复能力。
 
+### Collections
+
+收藏夹仍然是个人同步数据；共享清单是用户主动整理并选择可见性的列表。
+
+```http
+GET    /v1/collections/public
+GET    /v1/collections/{idOrSlug}
+GET    /v1/collections/mine
+GET    /v1/collections/mine/{idOrSlug}
+POST   /v1/collections
+PATCH  /v1/collections/{collectionId}
+DELETE /v1/collections/{collectionId}
+POST   /v1/collections/{collectionId}/items
+DELETE /v1/collections/{collectionId}/items/{itemId}
+POST   /v1/collections/{idOrSlug}/copy
+```
+
+可见性语义：
+
+- `private`: 只有创建者可见。
+- `unlisted`: 不进入公开列表，但知道链接或 slug 的用户可访问。
+- `public`: 进入公开清单列表。
+
+客户端从视频详情页把当前 `video_ref` 加入清单；公开清单条目点击后回到现有视频详情加载流程。复制清单会生成一个私密副本，用户可再决定是否公开。
+
 ## Android 集成顺序
 
 1. 先接登录和 token 刷新。
@@ -203,7 +253,8 @@ DELETE /v1/comments/{commentId}/like
 3. 登录后触发收藏同步：本地收藏上行，云端增量下行。
 4. 收藏表增加 `remoteId / syncState / updatedAt / deletedAt`。
 5. 评论区放在详情页播放器下方，首屏只拉 20 到 30 条。
-6. 网络失败时把收藏和评论写操作放进本地队列，后台重试。
+6. 用户页显示我的清单和公开清单；详情页提供“加入清单”入口。
+7. 网络失败时把收藏、评论和清单写操作放进本地队列，后台重试。
 
 ## 安全与后续
 
@@ -214,6 +265,7 @@ MVP 已做：
 - 写接口要求 JWT。
 - 评论和资料字段做长度限制。
 - 数据库唯一约束和外键约束。
+- 私密清单详情必须通过登录接口读取，公开接口只返回非私密清单。
 
 后续再做：
 
@@ -228,3 +280,4 @@ MVP 已做：
 - 设计并实现 NiceTV 账号系统、评论系统和云端收藏同步服务，基于 Go、JWT、PostgreSQL 构建用户数据闭环。
 - 设计离线优先的收藏同步协议，支持多设备增量同步、软删除 tombstone 和 Last Write Wins 冲突合并。
 - 为评论系统设计回复、点赞聚合、软删除和审核状态模型，为后续管理后台预留扩展点。
+- 设计共享清单模型，将私人收藏和公开策展列表解耦，支持 public/unlisted/private 可见性、清单复制和公开视频发现。

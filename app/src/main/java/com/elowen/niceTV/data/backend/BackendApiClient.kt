@@ -126,6 +126,78 @@ class BackendApiClient(
         ).comment
     }
 
+    suspend fun listMyCollections(accessToken: String): List<VideoCollection> {
+        return get(
+            path = "/v1/collections/mine",
+            accessToken = accessToken,
+            responseClass = CollectionsEnvelope::class.java
+        ).collections
+    }
+
+    suspend fun listPublicCollections(): List<VideoCollection> {
+        return get(
+            path = "/v1/collections/public",
+            responseClass = CollectionsEnvelope::class.java
+        ).collections
+    }
+
+    suspend fun getCollection(idOrSlug: String): CollectionDetail {
+        return get(
+            path = "/v1/collections/$idOrSlug",
+            responseClass = CollectionDetail::class.java
+        )
+    }
+
+    suspend fun getMyCollection(accessToken: String, idOrSlug: String): CollectionDetail {
+        return get(
+            path = "/v1/collections/mine/$idOrSlug",
+            accessToken = accessToken,
+            responseClass = CollectionDetail::class.java
+        )
+    }
+
+    suspend fun createCollection(
+        accessToken: String,
+        title: String,
+        description: String,
+        visibility: String,
+        coverUrl: String? = null
+    ): VideoCollection {
+        return post(
+            path = "/v1/collections",
+            accessToken = accessToken,
+            body = CollectionRequest(
+                title = title,
+                description = description,
+                visibility = visibility,
+                coverUrl = coverUrl
+            ),
+            responseClass = CollectionEnvelope::class.java
+        ).collection
+    }
+
+    suspend fun addCollectionItem(
+        accessToken: String,
+        collectionId: String,
+        request: AddCollectionItemRequest
+    ): CollectionItem {
+        return post(
+            path = "/v1/collections/$collectionId/items",
+            accessToken = accessToken,
+            body = request,
+            responseClass = CollectionItemEnvelope::class.java
+        ).item
+    }
+
+    suspend fun copyCollection(accessToken: String, idOrSlug: String): VideoCollection {
+        return post(
+            path = "/v1/collections/$idOrSlug/copy",
+            accessToken = accessToken,
+            body = emptyMap<String, String>(),
+            responseClass = CollectionEnvelope::class.java
+        ).collection
+    }
+
     private suspend fun <T> get(
         path: String,
         accessToken: String? = null,
