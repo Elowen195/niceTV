@@ -1,6 +1,9 @@
 package com.elowen.niceTV.data.backend
 
 import com.elowen.niceTV.BuildConfig
+import com.elowen.niceTV.core.NetworkRestrictionManager
+import com.elowen.niceTV.core.platform.proxy.ProxyHttpClientFactory
+import com.elowen.niceTV.core.platform.proxy.ProxyRuntimeConfig
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -21,12 +24,16 @@ class BackendApiClient(
     private val gson: Gson = Gson()
 ) {
     private val jsonType = "application/json; charset=utf-8".toMediaType()
-    private val client = OkHttpClient.Builder()
+    private val directClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
+    @Volatile
+    private var proxiedClient: OkHttpClient? = null
+    @Volatile
+    private var proxiedClientPort: Int? = null
 
     suspend fun register(username: String, password: String): AuthResponse {
         return post(
@@ -260,7 +267,7 @@ class BackendApiClient(
 
     private suspend fun <T> execute(request: Request, responseClass: Class<T>): T {
         return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
+            activeClient().newCall(request).execute().use { response ->
                 val raw = response.body.string()
                 if (!response.isSuccessful) {
                     throw ApiException(response.code, raw.ifBlank { response.message })
@@ -272,7 +279,7 @@ class BackendApiClient(
 
     private suspend fun executeNoBody(request: Request) {
         withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
+            activeClient().newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val raw = response.body.string()
                     throw ApiException(response.code, raw.ifBlank { response.message })
@@ -282,6 +289,25 @@ class BackendApiClient(
     }
 
     private fun jsonBody(body: Any) = gson.toJson(body).toRequestBody(jsonType)
+
+    private fun activeClient(): OkHttpClient {
+        if (!NetworkRestrictionManager.isProxyReady()) {
+            return directClient
+        }
+        val port = ProxyRuntimeConfig.getPort()
+        val cached = proxiedClient
+        if (cached != null && proxiedClientPort == port) {
+            return cached
+        }
+        return ProxyHttpClientFactory.createSocksClient(
+            connectTimeoutSeconds = 20,
+            readTimeoutSeconds = 20,
+            writeTimeoutSeconds = 20
+        ).also {
+            proxiedClient = it
+            proxiedClientPort = port
+        }
+    }
 
     private fun url(path: String): String {
         return baseUrl.trimEnd('/') + path

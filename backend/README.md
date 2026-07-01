@@ -75,6 +75,9 @@ GitHub Actions only checks that tests pass and the Docker image can build.
 Security templates and operations scripts:
 
 ```bash
+sudo install -d -m 0755 /etc/nginx/geo
+sudo cp deploy/nginx/nicetv-cn.zone /etc/nginx/geo/nicetv-cn.zone
+sudo scripts/update-cn-ip-blocklist.sh
 sudo cp deploy/nginx/nicetv-api-http.conf /etc/nginx/conf.d/nicetv-api-http.conf
 sudo cp deploy/nginx/nicetv-api-site.conf /etc/nginx/sites-available/nicetv-api
 sudo ln -sf /etc/nginx/sites-available/nicetv-api /etc/nginx/sites-enabled/nicetv-api

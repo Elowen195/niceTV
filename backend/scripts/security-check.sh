@@ -34,6 +34,14 @@ echo
 echo "== listening ports =="
 ss -tulpn | grep -E '(:5432|:8080)' || true
 
+echo
+echo "== country blocklist =="
+if [ -f /etc/nginx/geo/nicetv-cn.zone ]; then
+    wc -l /etc/nginx/geo/nicetv-cn.zone
+else
+    echo "missing /etc/nginx/geo/nicetv-cn.zone"
+fi
+
 if ss -tulpn | grep -E '0\.0\.0\.0:5432|\[::\]:5432' >/dev/null; then
     echo "unsafe: postgres is exposed publicly" >&2
     exit 1

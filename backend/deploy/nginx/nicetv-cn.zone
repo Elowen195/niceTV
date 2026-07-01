@@ -1,0 +1,2 @@
+# Empty placeholder. Install to /etc/nginx/geo/nicetv-cn.zone before nginx -t.
+# Run scripts/update-cn-ip-blocklist.sh on the VPS to populate China CIDR blocks.

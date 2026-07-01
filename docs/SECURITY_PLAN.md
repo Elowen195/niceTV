@@ -33,9 +33,11 @@ PostgreSQL must not be exposed on the VPS host network. The API should only bind
   - HTTPS redirect.
   - reverse proxy to `127.0.0.1:8080`.
   - rate limits for auth, write, and read paths.
+  - optional China CIDR blocklist through nginx `geo`.
   - basic security headers.
   - 1 MB request body limit.
 - API has in-memory per-IP rate limiting as defense in depth.
+- Android backend API requests use the in-app SOCKS proxy when the proxy is ready.
 - Backup and restore scripts are in `backend/scripts/`.
 - `backend/backups/` is ignored by Git.
 
@@ -77,6 +79,8 @@ docker compose up -d --build
 Install the http-level config:
 
 ```bash
+sudo install -d -m 0755 /etc/nginx/geo
+sudo cp deploy/nginx/nicetv-cn.zone /etc/nginx/geo/nicetv-cn.zone
 sudo cp deploy/nginx/nicetv-api-http.conf /etc/nginx/conf.d/nicetv-api-http.conf
 ```
 
@@ -95,6 +99,26 @@ Validate and reload:
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+## China IP Blocking
+
+Populate the China CIDR blocklist:
+
+```bash
+sudo scripts/update-cn-ip-blocklist.sh
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+The blocklist is written to `/etc/nginx/geo/nicetv-cn.zone`, and the HTTPS API server returns `403` when `$nicetv_country_blocked` is true.
+
+If the domain is proxied through Cloudflare, nginx will usually see Cloudflare edge IPs instead of the real visitor IP. In that case, prefer a Cloudflare WAF rule:
+
+```text
+(ip.geoip.country eq "CN")
+```
+
+Action: `Block`.
 
 ## Verification
 
