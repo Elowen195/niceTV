@@ -11,6 +11,7 @@ Go + Chi + PostgreSQL backend for NiceTV accounts, cloud favorites sync, comment
 - Cloud favorites with incremental sync and tombstones.
 - Comments, replies, soft delete, likes.
 - Shared video collections with private, unlisted, and public visibility.
+- Lightweight risk controls: per-user write throttles, muted/banned accounts, duplicate comment blocking, moderator/admin APIs, and moderation audit logs.
 
 ## Requirements
 
@@ -59,6 +60,7 @@ If the PostgreSQL volume already exists, apply new migrations before rebuilding 
 
 ```bash
 docker compose exec -T postgres psql -U nicetv -d nicetv < migrations/002_collections.sql
+docker compose exec -T postgres psql -U nicetv -d nicetv < migrations/003_risk_controls.sql
 docker compose up -d --build
 ```
 
@@ -164,10 +166,66 @@ DELETE /v1/collections/{collectionId}/items/{itemId}
 POST   /v1/collections/{idOrSlug}/copy
 ```
 
+Admin or moderator:
+
+```http
+GET    /v1/admin/users
+PATCH  /v1/admin/users/{userId}
+PATCH  /v1/admin/comments/{commentId}
+PATCH  /v1/admin/collections/{collectionId}
+GET    /v1/admin/moderation-actions
+```
+
 Use authenticated endpoints with:
 
 ```http
 Authorization: Bearer <accessToken>
+```
+
+## Risk Controls
+
+The backend keeps abuse controls deliberately small and cheap enough for a 1c2g VPS:
+
+- IP-level request throttles run before handlers.
+- Authenticated writes also get user-level throttles. New accounts are stricter for comments and collection creation.
+- Muted users can sign in and read content, but cannot comment or create/edit shared collections.
+- Banned users cannot sign in, refresh tokens, or use authenticated endpoints.
+- The same user cannot post an identical visible comment within 10 minutes.
+- Admin/moderator actions are recorded in `moderation_actions`.
+- Public collection listing and public collection reads ignore hidden/deleted collections.
+
+Bootstrap the first admin manually after registration:
+
+```bash
+docker compose exec postgres psql -U nicetv -d nicetv \
+  -c "update users set role = 'admin' where username = 'your-admin-username';"
+```
+
+Mute a user until a specific time:
+
+```bash
+curl -X PATCH https://api.linux-de.me/v1/admin/users/<user-id> \
+  -H "Authorization: Bearer <admin-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"mutedUntil":"2026-07-02T12:00:00Z","reason":"spam"}'
+```
+
+Ban a user:
+
+```bash
+curl -X PATCH https://api.linux-de.me/v1/admin/users/<user-id> \
+  -H "Authorization: Bearer <admin-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"banned","reason":"abuse"}'
+```
+
+Hide a comment or collection:
+
+```bash
+curl -X PATCH https://api.linux-de.me/v1/admin/comments/<comment-id> \
+  -H "Authorization: Bearer <admin-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"hidden","reason":"spam"}'
 ```
 
 ## Example

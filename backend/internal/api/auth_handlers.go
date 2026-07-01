@@ -99,6 +99,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid username/email or password")
 		return
 	}
+	if isUserBanned(userWithPassword.User) {
+		writeError(w, http.StatusForbidden, "account_banned", "account is banned")
+		return
+	}
 	resp, err := s.issueSession(r.Context(), userWithPassword.User, req.DeviceName)
 	if err != nil {
 		handleStoreError(w, err)
@@ -130,6 +134,10 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	user, err := s.store.GetUserByID(r.Context(), refreshToken.UserID)
 	if err != nil {
 		handleStoreError(w, err)
+		return
+	}
+	if isUserBanned(user) {
+		writeError(w, http.StatusForbidden, "account_banned", "account is banned")
 		return
 	}
 	resp, err := s.issueSession(r.Context(), user, req.DeviceName)

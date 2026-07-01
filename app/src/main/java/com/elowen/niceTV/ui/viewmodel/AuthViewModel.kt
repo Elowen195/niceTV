@@ -100,6 +100,8 @@ class AuthViewModel(
         return when {
             error is ApiException && error.statusCode == 409 -> "用户名或邮箱已被占用"
             error is ApiException && error.statusCode == 401 -> "账号或密码不正确"
+            error is ApiException && error.statusCode == 403 && message.contains("banned", ignoreCase = true) -> "账号已被封禁，无法继续登录"
+            error is ApiException && error.statusCode == 403 && message.contains("muted", ignoreCase = true) -> "账号已被禁言，暂时不能发布内容"
             error is ApiException && error.statusCode == 403 -> "当前网络无法访问后端，请开启代理后重试"
             error is ApiException && error.statusCode == 429 -> "操作太频繁，请稍后再试"
             message.contains("timeout", ignoreCase = true) -> "连接后端超时，请稍后重试"

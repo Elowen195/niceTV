@@ -39,7 +39,7 @@ func (p *Postgres) CreateUser(ctx context.Context, username string, email *strin
 	row := p.pool.QueryRow(ctx, `
 		insert into users (username, email, password_hash)
 		values ($1, $2, $3)
-		returning id, username, email, avatar_url, bio, role, created_at, updated_at
+		returning id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
 	`, username, email, passwordHash)
 	user, err := scanUser(row)
 	if err != nil {
@@ -50,7 +50,7 @@ func (p *Postgres) CreateUser(ctx context.Context, username string, email *strin
 
 func (p *Postgres) GetUserByLogin(ctx context.Context, login string) (models.UserWithPassword, error) {
 	row := p.pool.QueryRow(ctx, `
-		select id, username, email, avatar_url, bio, role, created_at, updated_at, password_hash
+		select id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at, password_hash
 		from users
 		where lower(username) = lower($1) or lower(coalesce(email, '')) = lower($1)
 	`, login)
@@ -62,6 +62,10 @@ func (p *Postgres) GetUserByLogin(ctx context.Context, login string) (models.Use
 		&user.AvatarURL,
 		&user.Bio,
 		&user.Role,
+		&user.Status,
+		&user.MutedUntil,
+		&user.BannedAt,
+		&user.BanReason,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&user.PasswordHash,
@@ -74,7 +78,7 @@ func (p *Postgres) GetUserByLogin(ctx context.Context, login string) (models.Use
 
 func (p *Postgres) GetUserByID(ctx context.Context, id string) (models.User, error) {
 	row := p.pool.QueryRow(ctx, `
-		select id, username, email, avatar_url, bio, role, created_at, updated_at
+		select id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
 		from users
 		where id = $1
 	`, id)
@@ -94,11 +98,94 @@ func (p *Postgres) UpdateUser(ctx context.Context, id string, username, email, a
 		    bio = case when $5::text is null then bio when $5 = '' then null else $5 end,
 		    updated_at = now()
 		where id = $1
-		returning id, username, email, avatar_url, bio, role, created_at, updated_at
+		returning id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
 	`, id, username, email, avatarURL, bio)
 	user, err := scanUser(row)
 	if err != nil {
 		return models.User{}, mapError(err)
+	}
+	return user, nil
+}
+
+func (p *Postgres) ListUsers(ctx context.Context, limit int) ([]models.User, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `
+		select id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
+		from users
+		order by created_at desc
+		limit $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := make([]models.User, 0)
+	for rows.Next() {
+		user, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (p *Postgres) SetUserRole(ctx context.Context, actorID, targetID, role, reason string) (models.User, error) {
+	row := p.pool.QueryRow(ctx, `
+		update users
+		set role = $2, updated_at = now()
+		where id = $1
+		returning id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
+	`, targetID, role)
+	user, err := scanUser(row)
+	if err != nil {
+		return models.User{}, mapError(err)
+	}
+	if err := p.recordModerationAction(ctx, actorID, "user", targetID, "set_role:"+role, reason); err != nil {
+		return models.User{}, err
+	}
+	return user, nil
+}
+
+func (p *Postgres) SetUserStatus(ctx context.Context, actorID, targetID, status, reason string) (models.User, error) {
+	row := p.pool.QueryRow(ctx, `
+		update users
+		set status = $2,
+		    banned_at = case when $2 = 'banned' then coalesce(banned_at, now()) else null end,
+		    ban_reason = case when $2 = 'banned' then nullif($3, '') else null end,
+		    updated_at = now()
+		where id = $1
+		returning id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
+	`, targetID, status, reason)
+	user, err := scanUser(row)
+	if err != nil {
+		return models.User{}, mapError(err)
+	}
+	if err := p.recordModerationAction(ctx, actorID, "user", targetID, "set_status:"+status, reason); err != nil {
+		return models.User{}, err
+	}
+	return user, nil
+}
+
+func (p *Postgres) SetUserMutedUntil(ctx context.Context, actorID, targetID string, mutedUntil *time.Time, reason string) (models.User, error) {
+	row := p.pool.QueryRow(ctx, `
+		update users
+		set muted_until = $2, updated_at = now()
+		where id = $1
+		returning id, username, email, avatar_url, bio, role, status, muted_until, banned_at, ban_reason, created_at, updated_at
+	`, targetID, mutedUntil)
+	user, err := scanUser(row)
+	if err != nil {
+		return models.User{}, mapError(err)
+	}
+	action := "clear_mute"
+	if mutedUntil != nil {
+		action = "mute"
+	}
+	if err := p.recordModerationAction(ctx, actorID, "user", targetID, action, reason); err != nil {
+		return models.User{}, err
 	}
 	return user, nil
 }
@@ -317,6 +404,23 @@ func (p *Postgres) ListComments(ctx context.Context, videoRefID string, limit in
 }
 
 func (p *Postgres) CreateComment(ctx context.Context, userID, videoRefID string, parentID *string, body string) (models.Comment, error) {
+	var duplicate bool
+	if err := p.pool.QueryRow(ctx, `
+		select exists(
+			select 1
+			from comments
+			where user_id = $1
+			  and status = 'visible'
+			  and lower(body) = lower($2)
+			  and created_at > now() - interval '10 minutes'
+		)
+	`, userID, body).Scan(&duplicate); err != nil {
+		return models.Comment{}, mapError(err)
+	}
+	if duplicate {
+		return models.Comment{}, ErrConflict
+	}
+
 	row := p.pool.QueryRow(ctx, `
 		insert into comments (user_id, video_ref_id, parent_id, body)
 		values ($1, $2, $3, $4)
@@ -384,6 +488,25 @@ func (p *Postgres) LikeComment(ctx context.Context, userID, commentID string) (m
 	return p.commentByID(ctx, commentID)
 }
 
+func (p *Postgres) ModerateComment(ctx context.Context, actorID, commentID, status, reason string) (models.Comment, error) {
+	row := p.pool.QueryRow(ctx, `
+		update comments
+		set status = $2,
+		    deleted_at = case when $2 in ('hidden', 'deleted') then coalesce(deleted_at, now()) else null end,
+		    updated_at = now()
+		where id = $1
+		returning id
+	`, commentID, status)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return models.Comment{}, mapError(err)
+	}
+	if err := p.recordModerationAction(ctx, actorID, "comment", commentID, "set_status:"+status, reason); err != nil {
+		return models.Comment{}, err
+	}
+	return p.commentByID(ctx, id)
+}
+
 func (p *Postgres) UnlikeComment(ctx context.Context, userID, commentID string) (models.Comment, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -441,7 +564,7 @@ func (p *Postgres) UpdateCollection(ctx context.Context, ownerID, collectionID s
 		    cover_url = case when $5::text is null then cover_url when $5 = '' then null else $5 end,
 		    visibility = coalesce(nullif($6, ''), visibility),
 		    updated_at = now()
-		where id = $1 and owner_id = $2
+		where id = $1 and owner_id = $2 and status <> 'deleted'
 		returning id
 	`, collectionID, ownerID, title, description, coverURL, visibility)
 	var id string
@@ -453,8 +576,9 @@ func (p *Postgres) UpdateCollection(ctx context.Context, ownerID, collectionID s
 
 func (p *Postgres) DeleteCollection(ctx context.Context, ownerID, collectionID string) error {
 	tag, err := p.pool.Exec(ctx, `
-		delete from collections
-		where id = $1 and owner_id = $2
+		update collections
+		set status = 'deleted', hidden_at = coalesce(hidden_at, now()), updated_at = now()
+		where id = $1 and owner_id = $2 and status <> 'deleted'
 	`, collectionID, ownerID)
 	if err != nil {
 		return mapError(err)
@@ -470,7 +594,7 @@ func (p *Postgres) ListMyCollections(ctx context.Context, ownerID string, limit 
 		limit = 50
 	}
 	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
-		where c.owner_id = $1
+		where c.owner_id = $1 and c.status <> 'deleted'
 		order by c.updated_at desc
 		limit $2
 	`, ownerID, limit)
@@ -486,7 +610,7 @@ func (p *Postgres) ListPublicCollections(ctx context.Context, limit int) ([]mode
 		limit = 30
 	}
 	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
-		where c.visibility = 'public'
+		where c.visibility = 'public' and c.status = 'visible'
 		order by c.updated_at desc
 		limit $1
 	`, limit)
@@ -525,7 +649,7 @@ func (p *Postgres) AddCollectionItem(ctx context.Context, ownerID, collectionID,
 	defer tx.Rollback(ctx)
 
 	var exists bool
-	if err := tx.QueryRow(ctx, `select exists(select 1 from collections where id = $1 and owner_id = $2)`, collectionID, ownerID).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `select exists(select 1 from collections where id = $1 and owner_id = $2 and status <> 'deleted')`, collectionID, ownerID).Scan(&exists); err != nil {
 		return models.CollectionItem{}, mapError(err)
 	}
 	if !exists {
@@ -575,7 +699,7 @@ func (p *Postgres) RemoveCollectionItem(ctx context.Context, ownerID, collection
 	tag, err := tx.Exec(ctx, `
 		delete from collection_items ci
 		using collections c
-		where ci.id = $1 and ci.collection_id = $2 and c.id = ci.collection_id and c.owner_id = $3
+		where ci.id = $1 and ci.collection_id = $2 and c.id = ci.collection_id and c.owner_id = $3 and c.status <> 'deleted'
 	`, itemID, collectionID, ownerID)
 	if err != nil {
 		return mapError(err)
@@ -586,7 +710,7 @@ func (p *Postgres) RemoveCollectionItem(ctx context.Context, ownerID, collection
 	if _, err := tx.Exec(ctx, `
 		update collections
 		set item_count = greatest(item_count - 1, 0), updated_at = now()
-		where id = $1 and owner_id = $2
+		where id = $1 and owner_id = $2 and status <> 'deleted'
 	`, collectionID, ownerID); err != nil {
 		return mapError(err)
 	}
@@ -642,13 +766,45 @@ func (p *Postgres) CopyCollection(ctx context.Context, ownerID, idOrSlug string)
 	return models.Collection{}, ErrConflict
 }
 
+func (p *Postgres) ModerateCollection(ctx context.Context, actorID, collectionID, status, reason string) (models.Collection, error) {
+	row := p.pool.QueryRow(ctx, `
+		update collections
+		set status = $2,
+		    hidden_at = case when $2 in ('hidden', 'deleted') then coalesce(hidden_at, now()) else null end,
+		    updated_at = now()
+		where id = $1
+		returning id
+	`, collectionID, status)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return models.Collection{}, mapError(err)
+	}
+	if err := p.recordModerationAction(ctx, actorID, "collection", collectionID, "set_status:"+status, reason); err != nil {
+		return models.Collection{}, err
+	}
+	return p.collectionByID(ctx, id)
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
 
 func scanUser(row scanner) (models.User, error) {
 	var user models.User
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.AvatarURL, &user.Bio, &user.Role, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.AvatarURL,
+		&user.Bio,
+		&user.Role,
+		&user.Status,
+		&user.MutedUntil,
+		&user.BannedAt,
+		&user.BanReason,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
 	return user, err
 }
 
@@ -773,7 +929,7 @@ func scanComments(rows pgx.Rows) ([]models.Comment, error) {
 
 const collectionSelectSQL = `
 	select c.id, c.owner_id, u.username, c.title, c.description, c.cover_url,
-	       c.visibility, c.slug, c.item_count, c.like_count, c.save_count,
+	       c.visibility, c.status, c.slug, c.item_count, c.like_count, c.save_count,
 	       c.created_at, c.updated_at
 	from collections c
 	join users u on u.id = c.owner_id
@@ -788,6 +944,7 @@ func (p *Postgres) collectionByIDOrSlug(ctx context.Context, viewerID *string, i
 	row := p.pool.QueryRow(ctx, collectionSelectSQL+`
 		where (c.id::text = $1 or c.slug = $1)
 		  and (c.visibility <> 'private' or ($2::uuid is not null and c.owner_id = $2))
+		  and (c.status = 'visible' or ($2::uuid is not null and c.owner_id = $2))
 	`, idOrSlug, viewerID)
 	return scanCollection(row)
 }
@@ -802,6 +959,7 @@ func scanCollection(row scanner) (models.Collection, error) {
 		&collection.Description,
 		&collection.CoverURL,
 		&collection.Visibility,
+		&collection.Status,
 		&collection.Slug,
 		&collection.ItemCount,
 		&collection.LikeCount,
@@ -875,6 +1033,50 @@ func scanCollectionItems(rows pgx.Rows) ([]models.CollectionItem, error) {
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (p *Postgres) ListModerationActions(ctx context.Context, limit int) ([]models.ModerationAction, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `
+		select ma.id, ma.actor_id, u.username, ma.target_type, ma.target_id, ma.action, ma.reason, ma.created_at
+		from moderation_actions ma
+		join users u on u.id = ma.actor_id
+		order by ma.created_at desc
+		limit $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	actions := make([]models.ModerationAction, 0)
+	for rows.Next() {
+		var action models.ModerationAction
+		err := rows.Scan(
+			&action.ID,
+			&action.ActorID,
+			&action.ActorUsername,
+			&action.TargetType,
+			&action.TargetID,
+			&action.Action,
+			&action.Reason,
+			&action.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, action)
+	}
+	return actions, rows.Err()
+}
+
+func (p *Postgres) recordModerationAction(ctx context.Context, actorID, targetType, targetID, action, reason string) error {
+	_, err := p.pool.Exec(ctx, `
+		insert into moderation_actions (actor_id, target_type, target_id, action, reason)
+		values ($1, $2, $3, $4, $5)
+	`, actorID, targetType, targetID, action, reason)
+	return mapError(err)
 }
 
 func newCollectionSlug() string {

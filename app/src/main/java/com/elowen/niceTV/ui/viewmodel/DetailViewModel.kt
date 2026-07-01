@@ -394,6 +394,10 @@ class DetailViewModel(
         return when {
             lower.contains("timeout") || lower.contains("timed out") ->
                 "网络请求超时，请重试或切换代理"
+            lower.contains("account is banned") || lower.contains("banned") ->
+                "账号已被封禁，无法继续操作"
+            lower.contains("account is muted") || lower.contains("muted") ->
+                "账号已被禁言，暂时不能发布内容"
             lower.contains("403") || lower.contains("forbidden") ->
                 "访问验证已失效，请重新验证后再试"
             lower.contains("404") || lower.contains("not found") ->

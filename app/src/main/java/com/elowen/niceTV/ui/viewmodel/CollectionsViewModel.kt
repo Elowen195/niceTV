@@ -217,6 +217,8 @@ class CollectionsViewModel(
         val message = error.message.orEmpty()
         return when {
             error is ApiException && error.statusCode == 401 -> "登录状态已失效，请重新登录"
+            error is ApiException && error.statusCode == 403 && message.contains("banned", ignoreCase = true) -> "账号已被封禁，无法操作共享清单"
+            error is ApiException && error.statusCode == 403 && message.contains("muted", ignoreCase = true) -> "账号已被禁言，暂时不能操作共享清单"
             error is ApiException && error.statusCode == 403 -> "当前网络无法访问共享清单，请开启代理后重试"
             error is ApiException && error.statusCode == 404 -> "清单不存在或没有访问权限"
             error is ApiException && error.statusCode == 429 -> "清单操作太频繁，请稍后再试"

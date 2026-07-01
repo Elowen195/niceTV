@@ -12,6 +12,7 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrConflict     = errors.New("conflict")
 	ErrUnauthorized = errors.New("unauthorized")
+	ErrForbidden    = errors.New("forbidden")
 )
 
 type Store interface {
@@ -19,6 +20,10 @@ type Store interface {
 	GetUserByLogin(ctx context.Context, login string) (models.UserWithPassword, error)
 	GetUserByID(ctx context.Context, id string) (models.User, error)
 	UpdateUser(ctx context.Context, id string, username, email, avatarURL, bio *string) (models.User, error)
+	ListUsers(ctx context.Context, limit int) ([]models.User, error)
+	SetUserRole(ctx context.Context, actorID, targetID, role, reason string) (models.User, error)
+	SetUserStatus(ctx context.Context, actorID, targetID, status, reason string) (models.User, error)
+	SetUserMutedUntil(ctx context.Context, actorID, targetID string, mutedUntil *time.Time, reason string) (models.User, error)
 
 	CreateRefreshToken(ctx context.Context, userID, tokenHash, deviceName string, expiresAt time.Time) (models.RefreshToken, error)
 	FindRefreshToken(ctx context.Context, tokenHash string) (models.RefreshToken, error)
@@ -37,6 +42,7 @@ type Store interface {
 	DeleteComment(ctx context.Context, userID, commentID string) error
 	LikeComment(ctx context.Context, userID, commentID string) (models.Comment, error)
 	UnlikeComment(ctx context.Context, userID, commentID string) (models.Comment, error)
+	ModerateComment(ctx context.Context, actorID, commentID, status, reason string) (models.Comment, error)
 
 	CreateCollection(ctx context.Context, ownerID, title, description string, coverURL *string, visibility string) (models.Collection, error)
 	UpdateCollection(ctx context.Context, ownerID, collectionID string, title, description, coverURL, visibility *string) (models.Collection, error)
@@ -47,4 +53,7 @@ type Store interface {
 	AddCollectionItem(ctx context.Context, ownerID, collectionID, videoRefID, note string, position *int) (models.CollectionItem, error)
 	RemoveCollectionItem(ctx context.Context, ownerID, collectionID, itemID string) error
 	CopyCollection(ctx context.Context, ownerID, idOrSlug string) (models.Collection, error)
+	ModerateCollection(ctx context.Context, actorID, collectionID, status, reason string) (models.Collection, error)
+
+	ListModerationActions(ctx context.Context, limit int) ([]models.ModerationAction, error)
 }

@@ -3,14 +3,18 @@ package models
 import "time"
 
 type User struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	Email     *string   `json:"email,omitempty"`
-	AvatarURL *string   `json:"avatarUrl,omitempty"`
-	Bio       *string   `json:"bio,omitempty"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID         string     `json:"id"`
+	Username   string     `json:"username"`
+	Email      *string    `json:"email,omitempty"`
+	AvatarURL  *string    `json:"avatarUrl,omitempty"`
+	Bio        *string    `json:"bio,omitempty"`
+	Role       string     `json:"role"`
+	Status     string     `json:"status"`
+	MutedUntil *time.Time `json:"mutedUntil,omitempty"`
+	BannedAt   *time.Time `json:"bannedAt,omitempty"`
+	BanReason  *string    `json:"banReason,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 type UserWithPassword struct {
@@ -73,6 +77,7 @@ type Collection struct {
 	Description   string    `json:"description"`
 	CoverURL      *string   `json:"coverUrl,omitempty"`
 	Visibility    string    `json:"visibility"`
+	Status        string    `json:"status"`
 	Slug          string    `json:"slug"`
 	ItemCount     int       `json:"itemCount"`
 	LikeCount     int       `json:"likeCount"`
@@ -113,4 +118,15 @@ type FavoriteSyncChange struct {
 type FavoriteSyncResult struct {
 	ServerTime time.Time  `json:"serverTime"`
 	Changes    []Favorite `json:"changes"`
+}
+
+type ModerationAction struct {
+	ID            string    `json:"id"`
+	ActorID       string    `json:"actorId"`
+	ActorUsername string    `json:"actorUsername"`
+	TargetType    string    `json:"targetType"`
+	TargetID      string    `json:"targetId"`
+	Action        string    `json:"action"`
+	Reason        string    `json:"reason"`
+	CreatedAt     time.Time `json:"createdAt"`
 }

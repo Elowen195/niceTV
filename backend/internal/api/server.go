@@ -12,6 +12,7 @@ import (
 
 	"nicetv/backend/internal/auth"
 	"nicetv/backend/internal/config"
+	"nicetv/backend/internal/models"
 	"nicetv/backend/internal/store"
 
 	"github.com/go-chi/chi/v5"
@@ -53,9 +54,19 @@ func (s *Server) Routes() http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.authRequired)
+			r.Use(s.riskGuard)
 
 			r.Get("/me", s.handleMe)
 			r.Patch("/me", s.handleUpdateMe)
+
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(s.adminRequired)
+				r.Get("/users", s.handleAdminListUsers)
+				r.Patch("/users/{userID}", s.handleAdminUpdateUser)
+				r.Patch("/comments/{commentID}", s.handleAdminModerateComment)
+				r.Patch("/collections/{collectionID}", s.handleAdminModerateCollection)
+				r.Get("/moderation-actions", s.handleAdminListModerationActions)
+			})
 
 			r.Get("/favorites", s.handleListFavorites)
 			r.Put("/favorites/{videoRefID}", s.handleUpsertFavorite)
@@ -85,6 +96,7 @@ func (s *Server) Routes() http.Handler {
 type contextKey string
 
 const userIDContextKey contextKey = "userID"
+const userContextKey contextKey = "user"
 
 func (s *Server) authRequired(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +111,17 @@ func (s *Server) authRequired(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired token")
 			return
 		}
-		ctx := context.WithValue(r.Context(), userIDContextKey, claims.UserID)
+		user, err := s.store.GetUserByID(r.Context(), claims.UserID)
+		if err != nil {
+			handleStoreError(w, err)
+			return
+		}
+		if isUserBanned(user) {
+			writeError(w, http.StatusForbidden, "account_banned", "account is banned")
+			return
+		}
+		ctx := context.WithValue(r.Context(), userIDContextKey, user.ID)
+		ctx = context.WithValue(ctx, userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -107,6 +129,11 @@ func (s *Server) authRequired(next http.Handler) http.Handler {
 func currentUserID(r *http.Request) string {
 	userID, _ := r.Context().Value(userIDContextKey).(string)
 	return userID
+}
+
+func currentUser(r *http.Request) models.User {
+	user, _ := r.Context().Value(userContextKey).(models.User)
+	return user
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -184,6 +211,8 @@ func handleStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "conflict", "resource already exists")
 	case errors.Is(err, store.ErrUnauthorized):
 		writeError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+	case errors.Is(err, store.ErrForbidden):
+		writeError(w, http.StatusForbidden, "forbidden", "forbidden")
 	default:
 		slog.Error("store error", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
