@@ -67,16 +67,10 @@ import com.elowen.niceTV.ui.viewmodel.CollectionsUiState
 @Composable
 fun UserScreen(
     authState: AuthUiState,
-    collectionsState: CollectionsUiState,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String) -> Unit,
     onLogout: () -> Unit,
-    onSyncFavorites: () -> Unit,
-    onRefreshCollections: () -> Unit,
-    onCreateCollection: (String, String, String) -> Unit,
-    onSelectCollection: (VideoCollection) -> Unit,
-    onCopyCollection: (VideoCollection) -> Unit,
-    onCollectionPostClick: (Post) -> Unit
+    onSyncFavorites: () -> Unit
 ) {
     val windowInfo = LocalWindowInfo.current
     val isCompact = with(LocalDensity.current) { windowInfo.containerSize.width.toDp() } < 600.dp
@@ -107,16 +101,6 @@ fun UserScreen(
             onSyncFavorites = onSyncFavorites
         )
         Spacer(modifier = Modifier.height(if (isCompact) 20.dp else 32.dp))
-        CollectionsPanel(
-            authState = authState,
-            state = collectionsState,
-            onRefresh = onRefreshCollections,
-            onCreateCollection = onCreateCollection,
-            onSelectCollection = onSelectCollection,
-            onCopyCollection = onCopyCollection,
-            onPostClick = onCollectionPostClick
-        )
-        Spacer(modifier = Modifier.height(if (isCompact) 20.dp else 32.dp))
 
         Text(
             text = "设置",
@@ -131,6 +115,50 @@ fun UserScreen(
             title = "代理设置",
             subtitle = "管理代理节点和订阅",
             onClick = { showProxySettings = true }
+        )
+    }
+}
+
+@Composable
+fun CollectionsScreen(
+    authState: AuthUiState,
+    state: CollectionsUiState,
+    onRefresh: () -> Unit,
+    onCreateCollection: (String, String, String) -> Unit,
+    onSelectCollection: (VideoCollection) -> Unit,
+    onCopyCollection: (VideoCollection) -> Unit,
+    onPostClick: (Post) -> Unit
+) {
+    val windowInfo = LocalWindowInfo.current
+    val isCompact = with(LocalDensity.current) { windowInfo.containerSize.width.toDp() } < 600.dp
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (isCompact) 12.dp else 16.dp)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(if (isCompact) 12.dp else 16.dp)
+    ) {
+        Text(
+            text = "清单",
+            color = Color.White,
+            fontSize = if (isCompact) 22.sp else 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "发现公开清单，整理自己的片单，也可以复制别人的好清单。",
+            color = Color.Gray,
+            fontSize = if (isCompact) 12.sp else 14.sp
+        )
+        CollectionsPanel(
+            authState = authState,
+            state = state,
+            onRefresh = onRefresh,
+            onCreateCollection = onCreateCollection,
+            onSelectCollection = onSelectCollection,
+            onCopyCollection = onCopyCollection,
+            onPostClick = onPostClick
         )
     }
 }
@@ -488,6 +516,14 @@ private fun visibilityIcon(value: String): ImageVector {
     }
 }
 
+private fun roleLabel(value: String?): String {
+    return when (value) {
+        "admin" -> "管理员"
+        "moderator" -> "协管"
+        else -> "普通用户"
+    }
+}
+
 @Composable
 private fun UserHeader(authState: AuthUiState, isCompact: Boolean) {
     Box(
@@ -520,7 +556,7 @@ private fun UserHeader(authState: AuthUiState, isCompact: Boolean) {
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = if (authState.isLoggedIn) "收藏可同步，评论可发布" else "登录后启用云收藏和评论",
+                text = if (authState.isLoggedIn) "${roleLabel(authState.session?.role)} · 收藏可同步，评论可发布" else "登录后启用云收藏和评论",
                 color = Color.Gray,
                 fontSize = if (isCompact) 12.sp else 14.sp
             )
@@ -545,7 +581,7 @@ private fun AccountPanel(
     ) {
         Text("账号", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (authState.isLoggedIn) {
-            Text("已连接 NiceTV 后端", color = Color.Gray, fontSize = 13.sp)
+            Text("已连接 NiceTV 后端 · ${roleLabel(authState.session?.role)}", color = Color.Gray, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     enabled = !authState.isLoading,

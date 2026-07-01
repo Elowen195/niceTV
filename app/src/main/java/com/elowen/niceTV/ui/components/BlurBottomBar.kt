@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -55,6 +56,7 @@ fun ResponsiveNavigation(
         NavItem(Icons.Default.Home, "首页"),
         NavItem(Icons.Default.Search, "搜索"),
         NavItem(Icons.Default.Favorite, "收藏"),
+        NavItem(Icons.Default.FolderShared, "清单"),
         NavItem(Icons.Default.Download, "下载"),
         NavItem(Icons.Default.Person, "我的")
     )
@@ -177,4 +179,3 @@ fun BlurBottomBar(
         }
     }
 }
-

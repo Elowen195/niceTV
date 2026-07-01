@@ -296,6 +296,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(
                     enabled = selectedUrl == null &&
                         (navState is NavigationState.Favorites ||
+                            navState is NavigationState.Collections ||
                             navState is NavigationState.Download ||
                             navState is NavigationState.User)
                 ) {
@@ -755,8 +756,9 @@ class MainActivity : ComponentActivity() {
                 (navState as NavigationState.VideoList).isSearch &&
                 listReturnTarget == null -> 1
             navState is NavigationState.Favorites -> 2
-            navState is NavigationState.Download -> 3
-            navState is NavigationState.User -> 4
+            navState is NavigationState.Collections -> 3
+            navState is NavigationState.Download -> 4
+            navState is NavigationState.User -> 5
             else -> -1
         }
     }
@@ -841,8 +843,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
             2 -> navState = NavigationState.Favorites
-            3 -> navState = NavigationState.Download
-            4 -> navState = NavigationState.User
+            3 -> navState = NavigationState.Collections
+            4 -> navState = NavigationState.Download
+            5 -> navState = NavigationState.User
         }
     }
 
@@ -1279,16 +1282,22 @@ fun ContentArea(
         is NavigationState.User -> {
              com.elowen.niceTV.ui.screens.UserScreen(
                  authState = authState,
-                 collectionsState = collectionsState,
                  onLogin = onLogin,
                  onRegister = onRegister,
                  onLogout = onLogout,
-                 onSyncFavorites = onSyncFavorites,
-                 onRefreshCollections = onRefreshCollections,
+                 onSyncFavorites = onSyncFavorites
+             )
+        }
+
+        is NavigationState.Collections -> {
+             com.elowen.niceTV.ui.screens.CollectionsScreen(
+                 authState = authState,
+                 state = collectionsState,
+                 onRefresh = onRefreshCollections,
                  onCreateCollection = onCreateCollection,
                  onSelectCollection = onSelectCollection,
                  onCopyCollection = onCopyCollection,
-                 onCollectionPostClick = onPostClick
+                 onPostClick = onPostClick
              )
         }
 

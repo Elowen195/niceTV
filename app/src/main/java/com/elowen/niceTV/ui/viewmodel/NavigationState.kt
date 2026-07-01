@@ -8,6 +8,7 @@ sealed class NavigationState {
         val isSearch: Boolean = false
     ) : NavigationState()
     object Favorites : NavigationState()
+    object Collections : NavigationState()
     object Download : NavigationState()
     object User : NavigationState()
 }

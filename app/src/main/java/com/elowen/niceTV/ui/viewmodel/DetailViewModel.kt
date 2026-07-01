@@ -199,7 +199,6 @@ class DetailViewModel(
         return when (name.uppercase(Locale.ROOT)) {
             "FST" -> 4
             "TV" -> 3
-            "VOE" -> 2
             "ST" -> 1
             else -> 0
         }

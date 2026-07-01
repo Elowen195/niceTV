@@ -22,7 +22,7 @@ class HtmlScraper() {
     private val BASE_LK_INIT_URL = "https://lk1.supremejav.com/supjav.php?l="
 
     private val SERVER_BG = mapOf(
-        "TV" to 1, "FST" to 2, "ST" to 3, "VOE" to 4
+        "TV" to 1, "FST" to 2, "ST" to 3
     )
 
     private data class PlayerPage(
@@ -238,10 +238,10 @@ class HtmlScraper() {
         Pair(detail, doc)
     }
 
-    private val ALL_SERVERS = listOf("FST", "TV", "ST", "VOE")
+    private val ALL_SERVERS = listOf("FST", "TV", "ST")
 
     /**
-     * 第二阶段：从文档中提取并解析所有 4 个服务器的视频地址（耗时操作）
+     * 第二阶段：从文档中提取并解析可用服务器的视频地址（耗时操作）
      */
     suspend fun resolveVideoUrlFromDoc(doc: org.jsoup.nodes.Document): Map<String, VideoSource> = withContext(Dispatchers.IO) {
         val btnServers = doc.select(".btn-server")
@@ -275,7 +275,7 @@ class HtmlScraper() {
     }
 
     /**
-     * 深度解析视频地址流水线，支持 bg 参数选择服务器 (TV=1, FST=2, ST=3, VOE=4)
+     * 深度解析视频地址流水线，支持 bg 参数选择服务器 (TV=1, FST=2, ST=3)
      */
     private suspend fun resolveVideoSource(dataLink: String, sourceType: String, bg: Int): VideoSource? = withContext(Dispatchers.IO) {
         val initUrl = "$BASE_LK_INIT_URL$dataLink&bg=$bg"
@@ -295,7 +295,6 @@ class HtmlScraper() {
             "FST" -> parseFst(playerPage.html, playerPage.referer)
             "ST" -> parseSt(playerPage.html, playerPage.referer)
             "TV" -> parseTv(playerPage.html, playerPage.referer)
-            "VOE" -> parseVoe(playerPage.html, playerPage.referer)
             else -> null
         }
     }
@@ -446,112 +445,6 @@ class HtmlScraper() {
             }
         } catch (_: Exception) {}
         return null
-    }
-
-    private suspend fun parseVoe(html: String, referer: String): VideoSource? {
-        try {
-            findVoeRedirect(html)?.let { redirect ->
-                resolveVoeRedirect(redirect, referer)?.let { return it }
-            }
-
-            val doc = Jsoup.parse(html)
-            val iframe = doc.selectFirst("iframe[src]")
-            val iframeSrc = iframe?.attr("src")?.let { resolveAgainst(referer, it) } ?: ""
-
-            if (iframeSrc.isNotEmpty()) {
-                val request = Request.Builder().url(iframeSrc).build()
-                HttpClient.client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val iframeHtml = response.body.string()
-
-                        val m3u8Pattern = java.util.regex.Pattern.compile(
-                            """['"](https?://[^'"]+\.m3u8[^'"]*)['"]""",
-                            java.util.regex.Pattern.CASE_INSENSITIVE
-                        )
-                        val m3u8Matcher = m3u8Pattern.matcher(iframeHtml)
-                        if (m3u8Matcher.find()) {
-                            val url = m3u8Matcher.group(1) ?: ""
-                            if (url.isNotEmpty()) return buildVideoSource(url, iframeSrc, "VOE")
-                        }
-
-                        val mp4Pattern = java.util.regex.Pattern.compile(
-                            """['"](https?://[^'"]+\.mp4[^'"]*)['"]""",
-                            java.util.regex.Pattern.CASE_INSENSITIVE
-                        )
-                        val mp4Matcher = mp4Pattern.matcher(iframeHtml)
-                        if (mp4Matcher.find()) {
-                            val url = mp4Matcher.group(1) ?: ""
-                            if (url.isNotEmpty()) return buildVideoSource(url, iframeSrc, "VOE")
-                        }
-
-                        val filePattern = java.util.regex.Pattern.compile(
-                            """['"]?file['"]?\s*[:=]\s*['"]([^'"]+)['"]""",
-                            java.util.regex.Pattern.CASE_INSENSITIVE
-                        )
-                        val fileMatcher = filePattern.matcher(iframeHtml)
-                        if (fileMatcher.find()) {
-                            val url = resolveAgainst(iframeSrc, fileMatcher.group(1) ?: "")
-                            if (url.isNotEmpty()) {
-                                return buildVideoSource(url, iframeSrc, "VOE")
-                            }
-                        }
-                    }
-                }
-            }
-
-            findFirstMediaUrl(html)?.let { url ->
-                return buildVideoSource(url, referer, "VOE")
-            }
-        } catch (_: Exception) {}
-        return null
-    }
-
-    private suspend fun resolveVoeRedirect(redirectUrl: String, referer: String): VideoSource? {
-        val resolvedRedirect = resolveAgainst(referer, redirectUrl)
-        val request = Request.Builder()
-            .url(resolvedRedirect)
-            .header("Referer", referer)
-            .build()
-        val redirectHtml = HttpClient.client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return null
-            response.body.string()
-        }
-
-        findFirstMediaUrl(redirectHtml)?.let { url ->
-            return buildVideoSource(url, resolvedRedirect, "VOE")
-        }
-
-        val filePattern = java.util.regex.Pattern.compile(
-            """['"]?file['"]?\s*[:=]\s*['"]([^'"]+)['"]""",
-            java.util.regex.Pattern.CASE_INSENSITIVE
-        )
-        val fileMatcher = filePattern.matcher(redirectHtml)
-        if (fileMatcher.find()) {
-            val resolved = resolveAgainst(resolvedRedirect, fileMatcher.group(1).orEmpty())
-            if (resolved.isNotBlank()) {
-                return buildVideoSource(resolved, resolvedRedirect, "VOE")
-            }
-        }
-
-        return null
-    }
-
-    private fun findVoeRedirect(html: String): String? {
-        val locationPattern = java.util.regex.Pattern.compile(
-            """window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""",
-            java.util.regex.Pattern.CASE_INSENSITIVE
-        )
-        val locationMatcher = locationPattern.matcher(html)
-        if (locationMatcher.find()) {
-            return locationMatcher.group(1)
-        }
-
-        val embedPattern = java.util.regex.Pattern.compile(
-            """https?://[^'"\s<>]+/e/[^'"\s<>]+""",
-            java.util.regex.Pattern.CASE_INSENSITIVE
-        )
-        val embedMatcher = embedPattern.matcher(html)
-        return if (embedMatcher.find()) embedMatcher.group() else null
     }
 
     private fun findFirstMediaUrl(html: String): String? {

@@ -8,7 +8,8 @@ import kotlinx.coroutines.withContext
 
 data class AuthSession(
     val userId: String,
-    val username: String
+    val username: String,
+    val role: String = "user"
 )
 
 class AuthRepository(
@@ -20,20 +21,21 @@ class AuthRepository(
     fun currentSession(): AuthSession? {
         val userId = SecurePrefs.getEncryptedString(prefs, KEY_USER_ID).orEmpty()
         val username = SecurePrefs.getEncryptedString(prefs, KEY_USERNAME).orEmpty()
+        val role = SecurePrefs.getEncryptedString(prefs, KEY_USER_ROLE).orEmpty().ifBlank { "user" }
         if (userId.isBlank() || username.isBlank()) return null
-        return AuthSession(userId = userId, username = username)
+        return AuthSession(userId = userId, username = username, role = role)
     }
 
     suspend fun login(login: String, password: String): AuthSession {
         val response = api.login(login.trim(), password)
         saveAuth(response)
-        return AuthSession(response.user.id, response.user.username)
+        return AuthSession(response.user.id, response.user.username, response.user.role)
     }
 
     suspend fun register(username: String, password: String): AuthSession {
         val response = api.register(username.trim(), password)
         saveAuth(response)
-        return AuthSession(response.user.id, response.user.username)
+        return AuthSession(response.user.id, response.user.username, response.user.role)
     }
 
     suspend fun logout() {
@@ -83,6 +85,7 @@ class AuthRepository(
             SecurePrefs.putEncryptedString(prefs, KEY_REFRESH_TOKEN, response.refreshToken)
             SecurePrefs.putEncryptedString(prefs, KEY_USER_ID, response.user.id)
             SecurePrefs.putEncryptedString(prefs, KEY_USERNAME, response.user.username)
+            SecurePrefs.putEncryptedString(prefs, KEY_USER_ROLE, response.user.role)
         }
     }
 
@@ -92,6 +95,7 @@ class AuthRepository(
             remove(KEY_REFRESH_TOKEN)
             remove(KEY_USER_ID)
             remove(KEY_USERNAME)
+            remove(KEY_USER_ROLE)
             remove(KEY_LAST_FAVORITE_SYNC)
         }
     }
@@ -107,7 +111,7 @@ class AuthRepository(
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USERNAME = "username"
+        private const val KEY_USER_ROLE = "user_role"
         private const val KEY_LAST_FAVORITE_SYNC = "last_favorite_sync"
     }
 }
-
