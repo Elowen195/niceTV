@@ -104,6 +104,25 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"user": updated})
 }
 
+func (s *Server) handleAdminListComments(w http.ResponseWriter, r *http.Request) {
+	status := normalizeOptionalCommentStatus(r.URL.Query().Get("status"))
+	if status == "__invalid__" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid comment status")
+		return
+	}
+	comments, err := s.store.ListAdminComments(
+		r.Context(),
+		status,
+		parseLimit(r, 50, 200),
+		parseOffset(r),
+	)
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"comments": comments})
+}
+
 func (s *Server) handleAdminModerateComment(w http.ResponseWriter, r *http.Request) {
 	commentID, err := normalizeID(chi.URLParam(r, "commentID"))
 	if err != nil {
@@ -127,6 +146,31 @@ func (s *Server) handleAdminModerateComment(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"comment": comment})
 }
 
+func (s *Server) handleAdminListCollections(w http.ResponseWriter, r *http.Request) {
+	visibility := normalizeOptionalCollectionVisibility(r.URL.Query().Get("visibility"))
+	if visibility == "__invalid__" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid visibility")
+		return
+	}
+	status := normalizeOptionalCollectionStatus(r.URL.Query().Get("status"))
+	if status == "__invalid__" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid collection status")
+		return
+	}
+	collections, err := s.store.ListAdminCollections(
+		r.Context(),
+		visibility,
+		status,
+		parseLimit(r, 50, 200),
+		parseOffset(r),
+	)
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"collections": collections})
+}
+
 func (s *Server) handleAdminModerateCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID, err := normalizeID(chi.URLParam(r, "collectionID"))
 	if err != nil {
@@ -148,6 +192,15 @@ func (s *Server) handleAdminModerateCollection(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"collection": collection})
+}
+
+func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.AdminStats(r.Context())
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (s *Server) handleAdminListModerationActions(w http.ResponseWriter, r *http.Request) {
@@ -200,12 +253,47 @@ func normalizeCommentStatus(value string) string {
 	}
 }
 
+func normalizeOptionalCommentStatus(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	normalized := normalizeCommentStatus(value)
+	if normalized == "" {
+		return "__invalid__"
+	}
+	return normalized
+}
+
 func normalizeCollectionStatus(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "visible", "hidden", "deleted":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
+	}
+}
+
+func normalizeOptionalCollectionStatus(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	normalized := normalizeCollectionStatus(value)
+	if normalized == "" {
+		return "__invalid__"
+	}
+	return normalized
+}
+
+func normalizeOptionalCollectionVisibility(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "public", "private", "unlisted":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "__invalid__"
 	}
 }
 

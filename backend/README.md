@@ -139,6 +139,7 @@ POST /v1/auth/logout
 POST /v1/video-refs
 GET  /v1/video-refs/{videoRefId}/comments
 GET  /v1/collections/public
+GET  /v1/collections/search?q={keyword}&limit=30&offset=0
 GET  /v1/collections/{idOrSlug}
 ```
 
@@ -162,6 +163,7 @@ POST   /v1/collections
 PATCH  /v1/collections/{collectionId}
 DELETE /v1/collections/{collectionId}
 POST   /v1/collections/{collectionId}/items
+PATCH  /v1/collections/{collectionId}/items/{itemId}
 DELETE /v1/collections/{collectionId}/items/{itemId}
 POST   /v1/collections/{idOrSlug}/copy
 ```
@@ -171,8 +173,11 @@ Admin or moderator:
 ```http
 GET    /v1/admin/users
 PATCH  /v1/admin/users/{userId}
+GET    /v1/admin/comments?status=visible&limit=50&offset=0
 PATCH  /v1/admin/comments/{commentId}
+GET    /v1/admin/collections?visibility=public&status=visible&limit=50&offset=0
 PATCH  /v1/admin/collections/{collectionId}
+GET    /v1/admin/stats
 GET    /v1/admin/moderation-actions
 ```
 
@@ -193,6 +198,7 @@ The backend keeps abuse controls deliberately small and cheap enough for a 1c2g 
 - The same user cannot post an identical visible comment within 10 minutes.
 - Admin/moderator actions are recorded in `moderation_actions`.
 - Public collection listing and public collection reads ignore hidden/deleted collections.
+- `reportedComments` in admin stats currently mirrors pending comments until a dedicated reports table exists.
 
 Bootstrap the first admin manually after registration:
 

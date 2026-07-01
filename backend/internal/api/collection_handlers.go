@@ -25,6 +25,11 @@ type addCollectionItemRequest struct {
 	Position   *int    `json:"position"`
 }
 
+type updateCollectionItemRequest struct {
+	Note     *string `json:"note"`
+	Position *int    `json:"position"`
+}
+
 func (s *Server) handleCreateCollection(w http.ResponseWriter, r *http.Request) {
 	var req collectionRequest
 	if !readJSON(w, r, &req) {
@@ -88,6 +93,25 @@ func (s *Server) handleListMyCollections(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleListPublicCollections(w http.ResponseWriter, r *http.Request) {
 	collections, err := s.store.ListPublicCollections(r.Context(), parseLimit(r, 30, 100))
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"collections": collections})
+}
+
+func (s *Server) handleSearchCollections(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len([]rune(query)) > 120 {
+		writeError(w, http.StatusBadRequest, "bad_request", "query is too long")
+		return
+	}
+	collections, err := s.store.SearchPublicCollections(
+		r.Context(),
+		query,
+		parseLimit(r, 30, 100),
+		parseOffset(r),
+	)
 	if err != nil {
 		handleStoreError(w, err)
 		return
@@ -161,6 +185,42 @@ func (s *Server) handleAddCollectionItem(w http.ResponseWriter, r *http.Request)
 		noteValue = *note
 	}
 	item, err := s.store.AddCollectionItem(r.Context(), currentUserID(r), collectionID, videoRefID, noteValue, req.Position)
+	if err != nil {
+		handleStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": item})
+}
+
+func (s *Server) handleUpdateCollectionItem(w http.ResponseWriter, r *http.Request) {
+	collectionID, err := normalizeID(chi.URLParam(r, "collectionID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	itemID, err := normalizeID(chi.URLParam(r, "itemID"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	var req updateCollectionItemRequest
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Note == nil && req.Position == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "note or position is required")
+		return
+	}
+	note, err := normalizeOptionalText(req.Note, 500)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "note is too long")
+		return
+	}
+	if req.Position != nil && *req.Position < 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "position must be non-negative")
+		return
+	}
+	item, err := s.store.UpdateCollectionItem(r.Context(), currentUserID(r), collectionID, itemID, note, req.Position)
 	if err != nil {
 		handleStoreError(w, err)
 		return

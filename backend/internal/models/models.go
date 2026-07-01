@@ -69,6 +69,12 @@ type Comment struct {
 	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
 }
 
+type AdminComment struct {
+	Comment
+	VideoTitle     string `json:"videoTitle"`
+	VideoSourceURL string `json:"videoSourceUrl"`
+}
+
 type Collection struct {
 	ID            string    `json:"id"`
 	OwnerID       string    `json:"ownerId"`
@@ -129,4 +135,17 @@ type ModerationAction struct {
 	Action        string    `json:"action"`
 	Reason        string    `json:"reason"`
 	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type AdminStats struct {
+	TotalUsers        int `json:"totalUsers"`
+	BannedUsers       int `json:"bannedUsers"`
+	MutedUsers        int `json:"mutedUsers"`
+	TotalCollections  int `json:"totalCollections"`
+	PublicCollections int `json:"publicCollections"`
+	HiddenCollections int `json:"hiddenCollections"`
+	TotalComments     int `json:"totalComments"`
+	PendingComments   int `json:"pendingComments"`
+	HiddenComments    int `json:"hiddenComments"`
+	ReportedComments  int `json:"reportedComments"`
 }

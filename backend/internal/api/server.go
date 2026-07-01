@@ -50,6 +50,7 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/video-refs", s.handleUpsertVideoRef)
 		r.Get("/video-refs/{videoRefID}/comments", s.handleListComments)
 		r.Get("/collections/public", s.handleListPublicCollections)
+		r.Get("/collections/search", s.handleSearchCollections)
 		r.Get("/collections/{idOrSlug}", s.handleGetCollection)
 
 		r.Group(func(r chi.Router) {
@@ -63,8 +64,11 @@ func (s *Server) Routes() http.Handler {
 				r.Use(s.adminRequired)
 				r.Get("/users", s.handleAdminListUsers)
 				r.Patch("/users/{userID}", s.handleAdminUpdateUser)
+				r.Get("/comments", s.handleAdminListComments)
 				r.Patch("/comments/{commentID}", s.handleAdminModerateComment)
+				r.Get("/collections", s.handleAdminListCollections)
 				r.Patch("/collections/{collectionID}", s.handleAdminModerateCollection)
+				r.Get("/stats", s.handleAdminStats)
 				r.Get("/moderation-actions", s.handleAdminListModerationActions)
 			})
 
@@ -85,6 +89,7 @@ func (s *Server) Routes() http.Handler {
 			r.Patch("/collections/{collectionID}", s.handleUpdateCollection)
 			r.Delete("/collections/{collectionID}", s.handleDeleteCollection)
 			r.Post("/collections/{collectionID}/items", s.handleAddCollectionItem)
+			r.Patch("/collections/{collectionID}/items/{itemID}", s.handleUpdateCollectionItem)
 			r.Delete("/collections/{collectionID}/items/{itemID}", s.handleRemoveCollectionItem)
 			r.Post("/collections/{idOrSlug}/copy", s.handleCopyCollection)
 		})
@@ -232,6 +237,18 @@ func parseLimit(r *http.Request, fallback, max int) int {
 		return max
 	}
 	return limit
+}
+
+func parseOffset(r *http.Request) int {
+	raw := r.URL.Query().Get("offset")
+	if raw == "" {
+		return 0
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func parseOptionalTime(raw string) (*time.Time, error) {

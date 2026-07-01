@@ -42,6 +42,7 @@ type Store interface {
 	DeleteComment(ctx context.Context, userID, commentID string) error
 	LikeComment(ctx context.Context, userID, commentID string) (models.Comment, error)
 	UnlikeComment(ctx context.Context, userID, commentID string) (models.Comment, error)
+	ListAdminComments(ctx context.Context, status string, limit, offset int) ([]models.AdminComment, error)
 	ModerateComment(ctx context.Context, actorID, commentID, status, reason string) (models.Comment, error)
 
 	CreateCollection(ctx context.Context, ownerID, title, description string, coverURL *string, visibility string) (models.Collection, error)
@@ -49,11 +50,15 @@ type Store interface {
 	DeleteCollection(ctx context.Context, ownerID, collectionID string) error
 	ListMyCollections(ctx context.Context, ownerID string, limit int) ([]models.Collection, error)
 	ListPublicCollections(ctx context.Context, limit int) ([]models.Collection, error)
+	SearchPublicCollections(ctx context.Context, query string, limit, offset int) ([]models.Collection, error)
 	GetCollection(ctx context.Context, viewerID *string, idOrSlug string) (models.CollectionDetail, error)
 	AddCollectionItem(ctx context.Context, ownerID, collectionID, videoRefID, note string, position *int) (models.CollectionItem, error)
+	UpdateCollectionItem(ctx context.Context, ownerID, collectionID, itemID string, note *string, position *int) (models.CollectionItem, error)
 	RemoveCollectionItem(ctx context.Context, ownerID, collectionID, itemID string) error
 	CopyCollection(ctx context.Context, ownerID, idOrSlug string) (models.Collection, error)
+	ListAdminCollections(ctx context.Context, visibility, status string, limit, offset int) ([]models.Collection, error)
 	ModerateCollection(ctx context.Context, actorID, collectionID, status, reason string) (models.Collection, error)
 
 	ListModerationActions(ctx context.Context, limit int) ([]models.ModerationAction, error)
+	AdminStats(ctx context.Context) (models.AdminStats, error)
 }

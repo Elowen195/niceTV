@@ -532,6 +532,51 @@ func (p *Postgres) UnlikeComment(ctx context.Context, userID, commentID string) 
 	return p.commentByID(ctx, commentID)
 }
 
+func (p *Postgres) ListAdminComments(ctx context.Context, status string, limit, offset int) ([]models.AdminComment, error) {
+	limit = normalizeLimit(limit, 50, 200)
+	offset = normalizeOffset(offset)
+	rows, err := p.pool.Query(ctx, `
+		select c.id, c.user_id, u.username, c.video_ref_id, c.parent_id, c.body,
+		       c.status, c.like_count, c.created_at, c.updated_at, c.deleted_at,
+		       v.title, v.source_url
+		from comments c
+		join users u on u.id = c.user_id
+		join video_refs v on v.id = c.video_ref_id
+		where ($1 = '' or c.status = $1)
+		order by c.created_at desc
+		limit $2 offset $3
+	`, status, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]models.AdminComment, 0)
+	for rows.Next() {
+		var item models.AdminComment
+		err := rows.Scan(
+			&item.ID,
+			&item.UserID,
+			&item.Username,
+			&item.VideoRefID,
+			&item.ParentID,
+			&item.Body,
+			&item.Status,
+			&item.LikeCount,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+			&item.DeletedAt,
+			&item.VideoTitle,
+			&item.VideoSourceURL,
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (p *Postgres) CreateCollection(ctx context.Context, ownerID, title, description string, coverURL *string, visibility string) (models.Collection, error) {
 	if visibility == "" {
 		visibility = "private"
@@ -621,6 +666,27 @@ func (p *Postgres) ListPublicCollections(ctx context.Context, limit int) ([]mode
 	return scanCollections(rows)
 }
 
+func (p *Postgres) SearchPublicCollections(ctx context.Context, query string, limit, offset int) ([]models.Collection, error) {
+	limit = normalizeLimit(limit, 30, 100)
+	offset = normalizeOffset(offset)
+	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
+		where c.visibility = 'public'
+		  and c.status = 'visible'
+		  and (
+		      $1 = ''
+		      or c.title ilike '%' || $1 || '%'
+		      or c.description ilike '%' || $1 || '%'
+		  )
+		order by c.updated_at desc
+		limit $2 offset $3
+	`, strings.TrimSpace(query), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCollections(rows)
+}
+
 func (p *Postgres) GetCollection(ctx context.Context, viewerID *string, idOrSlug string) (models.CollectionDetail, error) {
 	collection, err := p.collectionByIDOrSlug(ctx, viewerID, idOrSlug)
 	if err != nil {
@@ -681,6 +747,42 @@ func (p *Postgres) AddCollectionItem(ctx context.Context, ownerID, collectionID,
 			return models.CollectionItem{}, mapError(err)
 		}
 	} else if _, err := tx.Exec(ctx, `update collections set updated_at = now() where id = $1`, collectionID); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	return p.collectionItemByID(ctx, id)
+}
+
+func (p *Postgres) UpdateCollectionItem(ctx context.Context, ownerID, collectionID, itemID string, note *string, position *int) (models.CollectionItem, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return models.CollectionItem{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
+		update collection_items ci
+		set note = case when $4::text is null then ci.note else $4 end,
+		    position = coalesce($5, ci.position)
+		from collections c
+		where ci.id = $1
+		  and ci.collection_id = $2
+		  and c.id = ci.collection_id
+		  and c.owner_id = $3
+		  and c.status <> 'deleted'
+		returning ci.id
+	`, itemID, collectionID, ownerID, note, position)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		return models.CollectionItem{}, mapError(err)
+	}
+	if _, err := tx.Exec(ctx, `
+		update collections
+		set updated_at = now()
+		where id = $1 and owner_id = $2 and status <> 'deleted'
+	`, collectionID, ownerID); err != nil {
 		return models.CollectionItem{}, mapError(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -764,6 +866,22 @@ func (p *Postgres) CopyCollection(ctx context.Context, ownerID, idOrSlug string)
 		return p.collectionByID(ctx, newID)
 	}
 	return models.Collection{}, ErrConflict
+}
+
+func (p *Postgres) ListAdminCollections(ctx context.Context, visibility, status string, limit, offset int) ([]models.Collection, error) {
+	limit = normalizeLimit(limit, 50, 200)
+	offset = normalizeOffset(offset)
+	rows, err := p.pool.Query(ctx, collectionSelectSQL+`
+		where ($1 = '' or c.visibility = $1)
+		  and ($2 = '' or c.status = $2)
+		order by c.updated_at desc
+		limit $3 offset $4
+	`, visibility, status, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCollections(rows)
 }
 
 func (p *Postgres) ModerateCollection(ctx context.Context, actorID, collectionID, status, reason string) (models.Collection, error) {
@@ -1071,12 +1189,60 @@ func (p *Postgres) ListModerationActions(ctx context.Context, limit int) ([]mode
 	return actions, rows.Err()
 }
 
+func (p *Postgres) AdminStats(ctx context.Context) (models.AdminStats, error) {
+	var stats models.AdminStats
+	err := p.pool.QueryRow(ctx, `
+		select
+			(select count(*)::int from users),
+			(select count(*)::int from users where status = 'banned'),
+			(select count(*)::int from users where muted_until is not null and muted_until > now()),
+			(select count(*)::int from collections where status <> 'deleted'),
+			(select count(*)::int from collections where visibility = 'public' and status = 'visible'),
+			(select count(*)::int from collections where status = 'hidden'),
+			(select count(*)::int from comments where status <> 'deleted'),
+			(select count(*)::int from comments where status = 'pending'),
+			(select count(*)::int from comments where status = 'hidden')
+	`).Scan(
+		&stats.TotalUsers,
+		&stats.BannedUsers,
+		&stats.MutedUsers,
+		&stats.TotalCollections,
+		&stats.PublicCollections,
+		&stats.HiddenCollections,
+		&stats.TotalComments,
+		&stats.PendingComments,
+		&stats.HiddenComments,
+	)
+	if err != nil {
+		return models.AdminStats{}, err
+	}
+	stats.ReportedComments = stats.PendingComments
+	return stats, nil
+}
+
 func (p *Postgres) recordModerationAction(ctx context.Context, actorID, targetType, targetID, action, reason string) error {
 	_, err := p.pool.Exec(ctx, `
 		insert into moderation_actions (actor_id, target_type, target_id, action, reason)
 		values ($1, $2, $3, $4, $5)
 	`, actorID, targetType, targetID, action, reason)
 	return mapError(err)
+}
+
+func normalizeLimit(limit, fallback, max int) int {
+	if limit <= 0 {
+		return fallback
+	}
+	if limit > max {
+		return max
+	}
+	return limit
+}
+
+func normalizeOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func newCollectionSlug() string {
