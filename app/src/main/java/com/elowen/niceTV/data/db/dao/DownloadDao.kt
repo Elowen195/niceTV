@@ -13,6 +13,9 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads ORDER BY addedTimestamp DESC")
     fun getAllDownloads(): Flow<List<DownloadEntity>>
 
+    @Query("SELECT * FROM downloads ORDER BY addedTimestamp DESC")
+    suspend fun getAllDownloadsOnce(): List<DownloadEntity>
+
 
 
     @Query("SELECT * FROM downloads WHERE postUrl = :postUrl")

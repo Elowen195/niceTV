@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.offline.Download
 import com.elowen.niceTV.NiceTVApplication
 import com.elowen.niceTV.data.db.entity.DownloadEntity
 import com.elowen.niceTV.data.manager.CacheManager
+import com.elowen.niceTV.data.manager.CacheKeyUtil
 import com.elowen.niceTV.data.repository.DownloadRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -129,14 +130,24 @@ class DownloadViewModel(
     }
 
     private fun toDownloadItem(entity: DownloadEntity, download: Download?): DownloadItem {
-        val progress = calculateDownloadProgress(download)
-        val storageBytes = calculateItemStorageBytes(entity, download)
+        val offlinePath = usableOfflinePath(entity)
+        val effectiveEntity = if (offlinePath != null &&
+            (entity.mergeState != DownloadEntity.MERGE_COMPLETED || entity.mergedPath != offlinePath)
+        ) {
+            entity.copy(mergedPath = offlinePath, mergeState = DownloadEntity.MERGE_COMPLETED)
+        } else {
+            entity
+        }
+        val hasOfflineFile = offlinePath != null
+        val progress = if (hasOfflineFile) 100f else calculateDownloadProgress(download)
+        val storageBytes = calculateItemStorageBytes(effectiveEntity, download)
+        val stateCode = if (hasOfflineFile) Download.STATE_COMPLETED else download?.state
         return DownloadItem(
-            entity = entity,
+            entity = effectiveEntity,
             download = download,
             progressPercent = progress,
-            stateCode = download?.state,
-            bytesDownloaded = download?.bytesDownloaded ?: 0L,
+            stateCode = stateCode,
+            bytesDownloaded = download?.bytesDownloaded ?: storageBytes,
             storageBytes = storageBytes
         )
     }
@@ -192,6 +203,19 @@ class DownloadViewModel(
             ?.length()
             ?: 0L
         return maxOf(mergedBytes, download?.bytesDownloaded ?: 0L)
+    }
+
+    private fun usableOfflinePath(entity: DownloadEntity): String? {
+        entity.mergedPath
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.length() > 0L }
+            ?.absolutePath
+            ?.let { return it }
+
+        return File(NiceTVApplication.offlineMediaDir, "${CacheKeyUtil.forUrl(entity.postUrl)}.ts")
+            .takeIf { it.isFile && it.length() > 0L }
+            ?.absolutePath
     }
 
     private fun directorySize(dir: File?): Long {

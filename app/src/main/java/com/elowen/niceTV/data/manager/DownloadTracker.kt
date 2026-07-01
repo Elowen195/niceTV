@@ -44,6 +44,7 @@ class DownloadTracker(
     init {
         downloadManager.addListener(DownloadManagerListener())
         applicationScope.launch {
+            reconcilePersistedOfflineFiles()
             reconcileCompletedOfflineMedia()
         }
     }
@@ -68,6 +69,15 @@ class DownloadTracker(
                     Toast.makeText(context, "切换下载源，将替换旧的下载任务", Toast.LENGTH_SHORT).show()
                 }
                 removeDownloadInternal(postUrl)
+            }
+            if (existingSameSource != null) {
+                usableOfflinePath(existingSameSource)?.let { offlinePath ->
+                    downloadDao.updateMergeState(postUrl, offlinePath, DownloadEntity.MERGE_COMPLETED)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "已下载，可离线播放", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
             }
 
             val uri = videoUrl.toUri()
@@ -358,6 +368,18 @@ class DownloadTracker(
             }
     }
 
+    private suspend fun reconcilePersistedOfflineFiles() {
+        downloadDao.getAllDownloadsOnce().forEach { entity ->
+            val offlinePath = usableOfflinePath(entity) ?: return@forEach
+            if (
+                entity.mergeState != DownloadEntity.MERGE_COMPLETED ||
+                entity.mergedPath != offlinePath
+            ) {
+                downloadDao.updateMergeState(entity.postUrl, offlinePath, DownloadEntity.MERGE_COMPLETED)
+            }
+        }
+    }
+
     private suspend fun getDownloadSnapshot(postId: String): Download? {
         val active = downloadManager.currentDownloads.find { it.request.id == postId }
         return active ?: getDownloadFromIndex(postId)
@@ -367,6 +389,15 @@ class DownloadTracker(
         val mergedPath = path?.takeIf { it.isNotBlank() } ?: return false
         val mergedFile = File(mergedPath)
         return mergedFile.isFile && mergedFile.length() > 0L
+    }
+
+    private fun usableOfflinePath(entity: DownloadEntity): String? {
+        entity.mergedPath
+            ?.takeIf { hasUsableMergedFile(it) }
+            ?.let { return it }
+        return buildMergedOutputFile(entity)
+            .takeIf { it.isFile && it.length() > 0L }
+            ?.absolutePath
     }
 
     private fun buildMergedOutputFile(entity: DownloadEntity): File {
