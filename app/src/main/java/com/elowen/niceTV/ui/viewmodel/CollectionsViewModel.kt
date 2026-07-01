@@ -3,6 +3,7 @@ package com.elowen.niceTV.ui.viewmodel
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.elowen.niceTV.data.backend.ApiException
 import com.elowen.niceTV.data.backend.AuthRepository
 import com.elowen.niceTV.data.backend.BackendRepository
 import com.elowen.niceTV.data.backend.CollectionDetail
@@ -215,8 +216,10 @@ class CollectionsViewModel(
     private fun userFacingError(error: Throwable): String {
         val message = error.message.orEmpty()
         return when {
-            message.contains("401") -> "登录状态已失效，请重新登录"
-            message.contains("404") -> "清单不存在或没有访问权限"
+            error is ApiException && error.statusCode == 401 -> "登录状态已失效，请重新登录"
+            error is ApiException && error.statusCode == 403 -> "当前网络无法访问共享清单，请开启代理后重试"
+            error is ApiException && error.statusCode == 404 -> "清单不存在或没有访问权限"
+            error is ApiException && error.statusCode == 429 -> "清单操作太频繁，请稍后再试"
             message.contains("timeout", ignoreCase = true) -> "连接后端超时，请稍后重试"
             message.isBlank() -> "清单操作失败，请稍后重试"
             else -> "清单操作失败：$message"

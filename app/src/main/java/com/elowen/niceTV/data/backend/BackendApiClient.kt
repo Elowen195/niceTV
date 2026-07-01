@@ -19,6 +19,15 @@ class ApiException(
     message: String
 ) : IOException(message)
 
+private data class BackendErrorEnvelope(
+    val error: BackendErrorBody? = null
+)
+
+private data class BackendErrorBody(
+    val code: String? = null,
+    val message: String? = null
+)
+
 class BackendApiClient(
     private val baseUrl: String = BuildConfig.BACKEND_BASE_URL,
     private val gson: Gson = Gson()
@@ -270,7 +279,7 @@ class BackendApiClient(
             activeClient().newCall(request).execute().use { response ->
                 val raw = response.body.string()
                 if (!response.isSuccessful) {
-                    throw ApiException(response.code, raw.ifBlank { response.message })
+                    throw ApiException(response.code, errorMessage(response.code, raw, response.message))
                 }
                 gson.fromJson(raw, responseClass)
             }
@@ -282,13 +291,47 @@ class BackendApiClient(
             activeClient().newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val raw = response.body.string()
-                    throw ApiException(response.code, raw.ifBlank { response.message })
+                    throw ApiException(response.code, errorMessage(response.code, raw, response.message))
                 }
             }
         }
     }
 
     private fun jsonBody(body: Any) = gson.toJson(body).toRequestBody(jsonType)
+
+    private fun errorMessage(statusCode: Int, raw: String, fallback: String): String {
+        parseBackendError(raw)?.let { return it }
+        return when (statusCode) {
+            400 -> "请求内容有误，请稍后重试"
+            401 -> "登录状态已失效，请重新登录"
+            403 -> "当前网络无法访问后端，请开启代理后重试"
+            404 -> "资源不存在或已被移除"
+            409 -> "资源已存在，请刷新后再试"
+            429 -> "请求太频繁，请稍后再试"
+            in 500..599 -> "后端服务暂时不可用，请稍后重试"
+            else -> fallback.ifBlank { "请求失败，请稍后重试" }
+        }
+    }
+
+    private fun parseBackendError(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || looksLikeHtml(trimmed)) return null
+        return runCatching {
+            gson.fromJson(trimmed, BackendErrorEnvelope::class.java)
+                ?.error
+                ?.message
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && !looksLikeHtml(it) }
+        }.getOrNull()
+    }
+
+    private fun looksLikeHtml(value: String): Boolean {
+        val lower = value.trimStart().lowercase()
+        return lower.startsWith("<!doctype") ||
+            lower.startsWith("<html") ||
+            lower.contains("<body") ||
+            lower.contains("<head")
+    }
 
     private fun activeClient(): OkHttpClient {
         if (!NetworkRestrictionManager.isProxyReady()) {

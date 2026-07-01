@@ -194,8 +194,24 @@ private fun CollectionsPanel(
                 Text("正在加载清单...", color = Color.Gray, fontSize = 13.sp)
             }
         }
-        state.error?.let { Text(it, color = Color.Red, fontSize = 13.sp) }
-        state.message?.let { Text(it, color = Color.Cyan, fontSize = 13.sp) }
+        state.error?.let {
+            Text(
+                text = it,
+                color = Color(0xFFFF6B6B),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        state.message?.let {
+            Text(
+                text = it,
+                color = Color.Cyan,
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
 
         if (authState.isLoggedIn) {
             CollectionListSection(
@@ -558,8 +574,24 @@ private fun AccountPanel(
                 Text("正在处理...", color = Color.Gray, fontSize = 13.sp)
             }
         }
-        authState.error?.let { Text(it, color = Color.Red, fontSize = 13.sp) }
-        authState.message?.let { Text(it, color = Color.Cyan, fontSize = 13.sp) }
+        authState.error?.let {
+            Text(
+                text = it,
+                color = Color(0xFFFF6B6B),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        authState.message?.let {
+            Text(
+                text = it,
+                color = Color.Cyan,
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
