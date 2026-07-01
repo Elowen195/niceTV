@@ -43,7 +43,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -133,6 +135,10 @@ fun DetailScreen(
     val activity = context as? Activity
     val isTablet = with(LocalDensity.current) { windowInfo.containerSize.width.toDp() } >= 600.dp
     var showCollectionPicker by remember { mutableStateOf(false) }
+    val recommendationPosts = detail.recommendations.flatMap { it.posts }
+    var selectedContentTab by remember(detail.postLink, isOffline) {
+        mutableStateOf(if (isOffline) DetailContentTab.Comments else DetailContentTab.Recommendations)
+    }
 
     val safeCacheProgress = if (downloadProgress >= 0f) downloadProgress else 0f
 
@@ -631,40 +637,116 @@ fun DetailScreen(
                                         modifier = Modifier.clickable { onMakerClick(detail.maker, detail.makerLink.ifBlank { null }) }
                                     )
                                 }
-                                DetailCommentsSection(
-                                    comments = comments,
-                                    areLoading = areCommentsLoading,
-                                    isPosting = isCommentPosting,
-                                    error = commentError,
-                                    isLoggedIn = isLoggedIn,
-                                    onSubmitComment = onSubmitComment,
-                                    onLikeComment = onLikeComment
+                                Spacer(modifier = Modifier.height(20.dp))
+                                DetailContentTabs(
+                                    selectedTab = selectedContentTab,
+                                    commentsCount = comments.size,
+                                    recommendationCount = recommendationPosts.size,
+                                    showRecommendations = !isOffline,
+                                    onSelectTab = { selectedContentTab = it }
                                 )
                             }
                         }
-                        if (!isOffline) {
-                            item {
-                                Text(
-                                    text = "推荐视频",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(16.dp)
-                                )
+                        when (selectedContentTab) {
+                            DetailContentTab.Comments -> {
+                                item {
+                                    Column(
+                                        modifier = Modifier.padding(
+                                            start = 16.dp,
+                                            end = 16.dp,
+                                            top = 12.dp,
+                                            bottom = 20.dp
+                                        )
+                                    ) {
+                                        DetailCommentsSection(
+                                            comments = comments,
+                                            areLoading = areCommentsLoading,
+                                            isPosting = isCommentPosting,
+                                            error = commentError,
+                                            isLoggedIn = isLoggedIn,
+                                            onSubmitComment = onSubmitComment,
+                                            onLikeComment = onLikeComment,
+                                            showHeader = false
+                                        )
+                                    }
+                                }
                             }
-                            items(detail.recommendations.flatMap { it.posts }) { post ->
-                                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                                    val isCurrentOpening = isOpeningPost && openingPostUrl == post.link
-                                    VideoCard(
-                                        post = post,
-                                        onClick = { onPostClick(post) },
-                                        enabled = !isCurrentOpening,
-                                        isLoading = isCurrentOpening
-                                    )
+                            DetailContentTab.Recommendations -> if (!isOffline) {
+                                if (recommendationPosts.isEmpty()) {
+                                    item {
+                                        Text(
+                                            text = "暂无推荐视频",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.Gray,
+                                            modifier = Modifier.padding(16.dp)
+                                        )
+                                    }
+                                }
+                                items(recommendationPosts) { post ->
+                                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                        val isCurrentOpening = isOpeningPost && openingPostUrl == post.link
+                                        VideoCard(
+                                            post = post,
+                                            onClick = { onPostClick(post) },
+                                            enabled = !isCurrentOpening,
+                                            isLoading = isCurrentOpening
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private enum class DetailContentTab {
+    Recommendations,
+    Comments
+}
+
+@Composable
+private fun DetailContentTabs(
+    selectedTab: DetailContentTab,
+    commentsCount: Int,
+    recommendationCount: Int,
+    showRecommendations: Boolean,
+    onSelectTab: (DetailContentTab) -> Unit
+) {
+    val tabs = if (showRecommendations) {
+        listOf(DetailContentTab.Recommendations, DetailContentTab.Comments)
+    } else {
+        listOf(DetailContentTab.Comments)
+    }
+    val selectedIndex = tabs.indexOf(selectedTab).takeIf { it >= 0 } ?: 0
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        SecondaryTabRow(
+            selectedTabIndex = selectedIndex,
+            containerColor = Color.Transparent,
+            contentColor = Color.Cyan
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                Tab(
+                    selected = selectedIndex == index,
+                    onClick = { onSelectTab(tab) },
+                    text = {
+                        Text(
+                            text = when (tab) {
+                                DetailContentTab.Recommendations -> {
+                                    if (recommendationCount > 0) "推荐 $recommendationCount" else "推荐"
+                                }
+                                DetailContentTab.Comments -> {
+                                    if (commentsCount > 0) "评论 $commentsCount" else "评论"
+                                }
+                            },
+                            color = if (selectedIndex == index) Color.Cyan else Color.Gray
+                        )
+                    }
+                )
             }
         }
     }
@@ -678,14 +760,17 @@ private fun DetailCommentsSection(
     error: String?,
     isLoggedIn: Boolean,
     onSubmitComment: (String) -> Unit,
-    onLikeComment: (String) -> Unit
+    onLikeComment: (String) -> Unit,
+    showHeader: Boolean = true
 ) {
     var body by remember { mutableStateOf("") }
-    Spacer(modifier = Modifier.height(20.dp))
-    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-    Spacer(modifier = Modifier.height(16.dp))
-    Text("评论", style = MaterialTheme.typography.titleMedium, color = Color.White)
-    Spacer(modifier = Modifier.height(8.dp))
+    if (showHeader) {
+        Spacer(modifier = Modifier.height(20.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("评论", style = MaterialTheme.typography.titleMedium, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+    }
     if (!isLoggedIn) {
         Text("登录后可以发表评论和点赞。", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(8.dp))
